@@ -10,6 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js"></script>
 <style>
   :root{
     --bg:#0e1318;
@@ -69,8 +70,8 @@
     position:sticky;top:0;z-index:20;
   }
   nav.tabs button{
-    flex:1;padding:13px 8px;background:none;border:none;color:var(--muted);
-    font-family:var(--disp);font-size:14px;letter-spacing:.4px;text-transform:uppercase;font-weight:600;
+    flex:1;padding:13px 6px;background:none;border:none;color:var(--muted);
+    font-family:var(--disp);font-size:12.5px;letter-spacing:.2px;text-transform:uppercase;font-weight:600;
     border-bottom:3px solid transparent;cursor:pointer;
   }
   nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -130,6 +131,7 @@
   .back{background:none;border:none;color:var(--accent);font-family:var(--disp);font-weight:600;font-size:14px;cursor:pointer;padding:6px 0 14px;text-transform:uppercase;}
   .item-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;}
   .item-row.done{border-color:var(--success);background:var(--success-dim);}
+  .item-photo{width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
   .check{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;}
   .item-row.done .check{background:var(--success);border-color:var(--success);color:#06210f;}
   .item-info{flex:1;min-width:0;}
@@ -186,6 +188,32 @@
   .switch-row select{margin-bottom:0;width:auto;}
   .setup-banner{background:var(--danger-dim);border-bottom:2px solid var(--danger);padding:12px 16px;font-size:13px;line-height:1.6;}
   .setup-banner b{color:var(--danger);}
+
+  /* barcode label printing */
+  .code-pick-row{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;}
+  .code-pick-row input[type=checkbox]{width:18px;height:18px;flex-shrink:0;accent-color:var(--accent);margin:0;}
+  .code-pick-row .thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
+  .code-pick-row .thumb-placeholder{width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted);}
+  .code-pick-row .cinfo{flex:1;min-width:0;}
+  .code-pick-row .cinfo .cname{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .code-pick-row .cinfo .ccode{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .code-pick-row .cqty{width:56px;flex-shrink:0;margin:0;padding:6px 8px;text-align:center;}
+  .photo-btn{flex-shrink:0;background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:6px;padding:6px 9px;font-size:11px;cursor:pointer;font-family:var(--disp);text-transform:uppercase;}
+  #label-sheet{display:none;}
+  @media print{
+    body *{visibility:hidden;}
+    #label-sheet, #label-sheet *{visibility:visible;}
+    #label-sheet{display:block !important;position:absolute;left:0;top:0;width:100%;}
+    .label{page-break-inside:avoid;}
+  }
+  .label{
+    display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+    width:190px;height:110px;border:1px dashed #999;margin:4px;padding:6px;box-sizing:border-box;
+    font-family:Arial,sans-serif;color:#000;background:#fff;
+  }
+  .label .lname{font-size:11px;font-weight:700;text-align:center;line-height:1.2;max-height:26px;overflow:hidden;margin-bottom:2px;}
+  .label svg{max-width:100%;}
+  .label .lcode{font-size:11px;font-family:monospace;letter-spacing:1px;margin-top:2px;}
 </style>
 </head>
 <body>
@@ -199,8 +227,11 @@
   <nav class="tabs">
     <button id="tab-staff" class="active">สแกนแพ็ค</button>
     <button id="tab-admin">อัปโหลดออเดอร์</button>
+    <button id="tab-print">พิมพ์บาร์โค้ด</button>
+    <button id="tab-sets">ตั้งค่าเซท</button>
   </nav>
   <main id="main"></main>
+  <div id="label-sheet"></div>
   <div id="feedback" class="feedback"></div>
 </div>
 
@@ -355,7 +386,13 @@ const State = {
   search: '',
   html5Qr: null,
   camActive: false,
-  uploadParsed: null // {headers, rows}
+  uploadParsed: null, // {headers, rows}
+  printCodes: [], // [{code, name}]
+  printQty: {}, // code -> qty to print
+  printSearch: '',
+  photoCache: {}, // code -> dataURL or null
+  setList: [], // [{code,name,components:[{code,name,qty}]}]
+  setForm: null // working draft {code,name,components:[{code,name,qty}]} or null when not editing
 };
 
 /* ============ DATA LAYER ============ */
@@ -422,6 +459,101 @@ function sanitizeKeyPart(s){
 }
 function orderKey(date, orderId){ return 'order:'+date+':'+sanitizeKeyPart(orderId); }
 
+async function refreshPrintCodes(){
+  await loadDateIndex();
+  const map = {}; // code -> name
+  for(const date of State.dates){
+    const orders = await loadOrdersForDate(date);
+    orders.forEach(o => {
+      o.items.forEach(it => {
+        if(it.code) map[it.code] = it.name || map[it.code] || '';
+      });
+    });
+  }
+  const list = Object.keys(map).map(code => ({ code, name: map[code] }));
+  list.sort((a,b) => a.code.localeCompare(b.code));
+  State.printCodes = list;
+  list.forEach(it => { if(!(it.code in State.printQty)) State.printQty[it.code] = 1; });
+
+  // bulk-load thumbnails not yet cached, limited concurrency
+  const toLoad = list.filter(it => !(it.code in State.photoCache));
+  await mapWithConcurrency(toLoad, 6, async it => {
+    const v = await sGetWithRetry('photo:'+sanitizeKeyPart(it.code), true);
+    State.photoCache[it.code] = v || null;
+  });
+}
+
+function photoKey(code){ return 'photo:'+sanitizeKeyPart(code); }
+
+async function getPhotoForCode(code){
+  if(code in State.photoCache) return State.photoCache[code];
+  const v = await sGetWithRetry(photoKey(code), true);
+  State.photoCache[code] = v || null;
+  return State.photoCache[code];
+}
+
+function resizeImageFile(file, maxSize, quality){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w > h){ if(w > maxSize){ h = Math.round(h * maxSize / w); w = maxSize; } }
+        else { if(h > maxSize){ w = Math.round(w * maxSize / h); h = maxSize; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality||0.72));
+      };
+      img.onerror = reject;
+      img.src = ev.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============ SET (BUNDLE) DEFINITIONS ============ */
+function setKey(matchBy, value){ return 'set:'+matchBy+':'+sanitizeKeyPart(value); }
+function normName(s){ return String(s||'').trim().toLowerCase(); }
+
+// normalize legacy defs (saved before matchBy existed) to the new shape
+function normalizeSetDef(def){
+  if(!def.matchBy){ def.matchBy = 'code'; def.matchValue = def.code || ''; }
+  if(!('matchValue' in def)) def.matchValue = def.code || '';
+  return def;
+}
+
+async function refreshSets(){
+  await refreshPrintCodes(); // so we have the code+name catalog for the picker
+  const keys = await sList('set:', true);
+  const results = await mapWithConcurrency(keys, 6, async k => {
+    const v = await sGetWithRetry(k, true);
+    if(!v) return null;
+    try{ return normalizeSetDef(JSON.parse(v)); }catch(e){ return null; }
+  });
+  State.setList = results.filter(Boolean).sort((a,b) => (a.matchValue||'').localeCompare(b.matchValue||''));
+}
+
+async function loadAllSetDefs(){
+  const keys = await sList('set:', true);
+  const byCode = {}, byName = {};
+  const results = await mapWithConcurrency(keys, 6, async k => {
+    const v = await sGetWithRetry(k, true);
+    if(!v) return null;
+    try{ return normalizeSetDef(JSON.parse(v)); }catch(e){ return null; }
+  });
+  results.filter(Boolean).forEach(def => {
+    if(def.matchBy==='name') byName[normName(def.matchValue)] = def;
+    else byCode[def.matchValue] = def;
+  });
+  return { byCode, byName };
+}
+
 function orderStatus(order){
   let total=0, scanned=0;
   order.items.forEach(it => { total += it.qtyRequired; scanned += Math.min(it.qtyScanned, it.qtyRequired); });
@@ -445,17 +577,31 @@ function setTab(tab){
   State.view = tab;
   document.getElementById('tab-staff').classList.toggle('active', tab==='staff');
   document.getElementById('tab-admin').classList.toggle('active', tab==='admin');
+  document.getElementById('tab-print').classList.toggle('active', tab==='print');
+  document.getElementById('tab-sets').classList.toggle('active', tab==='sets');
   stopCamera();
   render();
 }
 document.getElementById('tab-staff').onclick = () => setTab('staff');
 document.getElementById('tab-admin').onclick = () => setTab('admin');
+document.getElementById('tab-print').onclick = () => setTab('print');
+document.getElementById('tab-sets').onclick = () => setTab('sets');
 
 async function render(){
   const main = document.getElementById('main');
   if(State.view==='admin'){
     main.innerHTML = renderAdmin();
     wireAdmin();
+  } else if(State.view==='print'){
+    main.innerHTML = '<div class="empty">กำลังโหลดรายการสินค้า...</div>';
+    await refreshPrintCodes();
+    main.innerHTML = renderPrint();
+    wirePrint();
+  } else if(State.view==='sets'){
+    main.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+    await refreshSets();
+    main.innerHTML = renderSets();
+    wireSets();
   } else {
     if(State.staffSub==='detail' && State.currentOrder){
       main.innerHTML = renderDetail();
@@ -570,6 +716,13 @@ async function openOrder(orderId){
   const raw = await sGet(orderKey(State.date, orderId), true);
   State.currentOrder = raw ? JSON.parse(raw) : null;
   State.staffSub = 'detail';
+  if(State.currentOrder){
+    const toLoad = State.currentOrder.items.filter(it => !(it.code in State.photoCache));
+    await mapWithConcurrency(toLoad, 6, async it => {
+      const v = await sGetWithRetry('photo:'+sanitizeKeyPart(it.code), true);
+      State.photoCache[it.code] = v || null;
+    });
+  }
   render();
 }
 
@@ -581,8 +734,11 @@ function renderDetail(){
   const items = o.items.map((it, idx) => {
     const done = it.qtyScanned >= it.qtyRequired;
     const over = it.qtyScanned > it.qtyRequired;
+    const photo = State.photoCache[it.code];
+    const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : '';
     return `<div class="item-row ${done?'done':''}">
       <div class="check">${done?'✓':''}</div>
+      ${photoHtml}
       <div class="item-info">
         <div class="name">${esc(it.name)}</div>
         <div class="code">${esc(it.code)}</div>
@@ -905,9 +1061,12 @@ function wireAdmin(){
     const custI = custIdxVal==='-1' ? -1 : parseInt(custIdxVal);
     const oh = headers[oi], nh = headers[ni], ch = headers[ci], qh = headers[qi], custH = custI>=0 ? headers[custI] : null;
 
-    // group rows by order id
+    const setDefs = await loadAllSetDefs();
+
+    // group rows by order id (expanding any "set/bundle" SKUs into their component items)
     const grouped = {};
     let skippedInvalid = 0;
+    let expandedSets = 0;
     effRows.forEach(r => {
       const orderIdRaw = String(r[oh]||'').trim();
       const codeRaw = String(r[ch]||'').trim();
@@ -919,9 +1078,21 @@ function wireAdmin(){
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
       if(isNaN(qty) || qty<=0) qty = 1;
-      const existing = grouped[orderId].items.find(it => it.code === code);
-      if(existing){ existing.qtyRequired += qty; }
-      else { grouped[orderId].items.push({ code, name, qtyRequired: qty, qtyScanned: 0 }); }
+
+      const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
+      if(setDef && setDef.components && setDef.components.length){
+        expandedSets++;
+        setDef.components.forEach(comp => {
+          const compQty = (comp.qty||1) * qty;
+          const existing = grouped[orderId].items.find(it => it.code === comp.code);
+          if(existing){ existing.qtyRequired += compQty; }
+          else { grouped[orderId].items.push({ code: comp.code, name: comp.name || comp.code, qtyRequired: compQty, qtyScanned: 0 }); }
+        });
+      } else {
+        const existing = grouped[orderId].items.find(it => it.code === code);
+        if(existing){ existing.qtyRequired += qty; }
+        else { grouped[orderId].items.push({ code, name, qtyRequired: qty, qtyScanned: 0 }); }
+      }
     });
 
     const orderIds = Object.keys(grouped);
@@ -947,12 +1118,420 @@ function wireAdmin(){
     }
     await addDateToIndex(date);
 
-    toast('นำเข้าสำเร็จ '+orderIds.length+' ออเดอร์' + (skippedInvalid ? ' (ข้าม '+skippedInvalid+' แถวที่ข้อมูลไม่ครบ)' : ''));
+    toast('นำเข้าสำเร็จ '+orderIds.length+' ออเดอร์'
+      + (expandedSets ? ' (แตกเซทให้ '+expandedSets+' รายการ)' : '')
+      + (skippedInvalid ? ' (ข้าม '+skippedInvalid+' แถวที่ข้อมูลไม่ครบ)' : ''));
     State.uploadParsed = null;
     State.date = date;
     setTab('staff');
   };
 }
+
+/* ============ PRINT BARCODE LABELS ============ */
+function renderPrint(){
+  const filtered = State.printCodes.filter(it => {
+    if(!State.printSearch) return true;
+    const s = State.printSearch.toLowerCase();
+    return it.code.toLowerCase().includes(s) || (it.name||'').toLowerCase().includes(s);
+  });
+
+  if(State.printCodes.length===0){
+    return `<div class="empty"><div class="big">🏷️</div>ยังไม่มีรหัสสินค้าให้พิมพ์บาร์โค้ด<br><span class="muted" style="font-size:13px">อัปโหลดออเดอร์อย่างน้อย 1 ครั้งก่อน ระบบจะดึงรหัสสินค้าจากออเดอร์มาให้เลือกพิมพ์</span></div>`;
+  }
+
+  const rows = filtered.map(it => {
+    const photo = State.photoCache[it.code];
+    const thumbHtml = photo
+      ? `<img class="thumb" src="${photo}" data-thumb-for="${esc(it.code)}">`
+      : `<div class="thumb-placeholder" data-thumb-for="${esc(it.code)}">🏷️</div>`;
+    return `
+    <div class="code-pick-row">
+      <input type="checkbox" class="print-check" data-code="${esc(it.code)}">
+      ${thumbHtml}
+      <div class="cinfo">
+        <div class="cname">${esc(it.name||'(ไม่มีชื่อสินค้า)')}</div>
+        <div class="ccode">${esc(it.code)}</div>
+      </div>
+      <input type="number" class="cqty" min="1" max="200" value="${State.printQty[it.code]||1}" data-code-qty="${esc(it.code)}">
+      <button type="button" class="photo-btn" data-photo-btn="${esc(it.code)}">📷 รูป</button>
+      <input type="file" accept="image/*" capture="environment" style="display:none" data-photo-input="${esc(it.code)}">
+    </div>
+  `;
+  }).join('');
+
+  return `
+    <h2 class="section">พิมพ์สติกเกอร์บาร์โค้ดสินค้า</h2>
+    <div class="card muted" style="font-size:13px;line-height:1.6">
+      เลือกสินค้าที่ต้องการพิมพ์บาร์โค้ด (ใช้รหัส Seller SKU เดิมเป็นบาร์โค้ด) ใส่จำนวนดวงที่ต้องการต่อสินค้าหนึ่งชนิด แล้วกดพิมพ์ — นำกระดาษสติกเกอร์ใส่เครื่องพิมพ์ก่อนกด Print
+    </div>
+    <input type="text" id="print-search" placeholder="ค้นหารหัสหรือชื่อสินค้า..." value="${esc(State.printSearch)}">
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn secondary" id="select-all">เลือกทั้งหมด</button>
+      <button class="btn secondary" id="select-none">ยกเลิกทั้งหมด</button>
+    </div>
+    <div id="code-list">${rows}</div>
+    <div class="scan-bar" style="margin-top:14px">
+      <button class="btn" id="do-print">🖨️ พิมพ์สติกเกอร์ที่เลือก</button>
+    </div>
+  `;
+}
+
+function wirePrint(){
+  const search = document.getElementById('print-search');
+  if(search){
+    search.oninput = (e) => {
+      const caret = e.target.selectionStart;
+      State.printSearch = e.target.value;
+      document.getElementById('main').innerHTML = renderPrint();
+      wirePrint();
+      const s2 = document.getElementById('print-search');
+      if(s2){ s2.focus(); s2.setSelectionRange(caret, caret); }
+    };
+  }
+  document.querySelectorAll('[data-code-qty]').forEach(inp => {
+    inp.onchange = () => {
+      let v = parseInt(inp.value);
+      if(isNaN(v) || v<1) v = 1;
+      State.printQty[inp.getAttribute('data-code-qty')] = v;
+      inp.value = v;
+    };
+  });
+  const selectAll = document.getElementById('select-all');
+  if(selectAll) selectAll.onclick = () => document.querySelectorAll('.print-check').forEach(c => c.checked = true);
+  const selectNone = document.getElementById('select-none');
+  if(selectNone) selectNone.onclick = () => document.querySelectorAll('.print-check').forEach(c => c.checked = false);
+
+  document.querySelectorAll('[data-photo-btn]').forEach(btn => {
+    btn.onclick = () => {
+      const code = btn.getAttribute('data-photo-btn');
+      const input = document.querySelector('[data-photo-input="'+CSS.escape(code)+'"]');
+      if(input) input.click();
+    };
+  });
+  document.querySelectorAll('[data-photo-input]').forEach(inp => {
+    inp.onchange = async (e) => {
+      const code = inp.getAttribute('data-photo-input');
+      const file = e.target.files[0];
+      if(!file) return;
+      const btn = document.querySelector('[data-photo-btn="'+CSS.escape(code)+'"]');
+      if(btn){ btn.textContent = '...'; btn.disabled = true; }
+      try{
+        const dataUrl = await resizeImageFile(file, 240, 0.72);
+        await sSetWithRetry(photoKey(code), dataUrl, true);
+        State.photoCache[code] = dataUrl;
+        const thumb = document.querySelector('[data-thumb-for="'+CSS.escape(code)+'"]');
+        if(thumb){
+          const img = document.createElement('img');
+          img.className = 'thumb';
+          img.setAttribute('data-thumb-for', code);
+          img.src = dataUrl;
+          thumb.replaceWith(img);
+        }
+        toast('บันทึกรูปแล้ว');
+      }catch(err){
+        toast('อัปโหลดรูปไม่สำเร็จ ลองใหม่อีกครั้ง');
+      }
+      if(btn){ btn.textContent = '📷 รูป'; btn.disabled = false; }
+    };
+  });
+
+  document.getElementById('do-print').onclick = () => {
+    const checked = Array.from(document.querySelectorAll('.print-check:checked')).map(c => c.getAttribute('data-code'));
+    if(checked.length===0){ toast('กรุณาเลือกสินค้าที่ต้องการพิมพ์อย่างน้อย 1 รายการ'); return; }
+    if(typeof JsBarcode === 'undefined'){ toast('โหลดตัวสร้างบาร์โค้ดไม่สำเร็จ ลองรีเฟรชหน้าใหม่'); return; }
+
+    const sheet = document.getElementById('label-sheet');
+    sheet.innerHTML = '';
+    checked.forEach(code => {
+      const item = State.printCodes.find(c => c.code === code);
+      const qty = State.printQty[code] || 1;
+      for(let i=0;i<qty;i++){
+        const label = document.createElement('div');
+        label.className = 'label';
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'lname';
+        nameDiv.textContent = item.name || '';
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        label.appendChild(nameDiv);
+        label.appendChild(svg);
+        const codeDiv = document.createElement('div');
+        codeDiv.className = 'lcode';
+        codeDiv.textContent = code;
+        label.appendChild(codeDiv);
+        sheet.appendChild(label);
+        try{
+          JsBarcode(svg, code, { format: 'CODE128', width: 1.6, height: 40, displayValue: false, margin: 2 });
+        }catch(e){ console.error('barcode render failed', code, e); }
+      }
+    });
+    setTimeout(() => window.print(), 150);
+  };
+}
+
+/* ============ SETS (BUNDLES) UI ============ */
+function catalogDatalist(){
+  return State.printCodes.map(it => `<option value="${esc(it.code)}">${esc(it.name||'')}</option>`).join('');
+}
+
+function renderSets(){
+  const listHtml = State.setList.length ? State.setList.map(def => `
+    <div class="card" data-set-card="${esc(def.matchValue)}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div>
+          <div style="font-weight:700">${esc(def.name || def.matchValue)}</div>
+          <div class="mono muted" style="font-size:12px">${def.matchBy==='name' ? 'จับคู่ด้วยชื่อ: ' : 'SKU: '}${esc(def.matchValue)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn ghost" style="width:auto;padding:8px 12px" data-edit-set="${esc(def.matchBy)}|${esc(def.matchValue)}">แก้ไข</button>
+          <button class="btn ghost" style="width:auto;padding:8px 12px;color:var(--danger)" data-del-set="${esc(def.matchBy)}|${esc(def.matchValue)}">ลบ</button>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">ประกอบด้วย:</div>
+      ${(def.components||[]).map(c => `<div style="font-size:13px;margin-top:3px">• ${esc(c.name||c.code)} <span class="mono muted">(${esc(c.code)})</span> × ${c.qty}</div>`).join('')}
+    </div>
+  `).join('') : `<div class="empty">ยังไม่มีเซทที่ตั้งค่าไว้</div>`;
+
+  if(!State.setForm){
+    return `
+      <h2 class="section">ตั้งค่าเซทสินค้า</h2>
+      <div class="card muted" style="font-size:13px;line-height:1.6">
+        สำหรับสินค้าที่จริงๆ แล้วต้องหยิบสินค้าเดี่ยวหลายชิ้นมารวมกัน — ตั้งค่าครั้งเดียวว่าเซทนั้นประกอบด้วยอะไรบ้าง ระบบจะแตกเป็นรายการย่อยให้อัตโนมัติทุกครั้งที่อัปโหลดออเดอร์ใหม่ จับคู่ได้ทั้งด้วยรหัส SKU หรือด้วยชื่อสินค้า (สำหรับเซทที่ไม่มี SKU เพราะติดเรื่องโปรแกรมบัญชี)
+      </div>
+      <button class="btn" id="new-set-btn">+ เพิ่มเซทใหม่ (ทีละรายการ)</button>
+      <div class="card" style="margin-top:12px">
+        <div style="font-weight:700;margin-bottom:6px">นำเข้าหลายเซทพร้อมกันจากไฟล์ Excel</div>
+        <div class="muted" style="font-size:13px;margin-bottom:10px;line-height:1.6">ดาวน์โหลดเทมเพลต กรอกรายการเซททั้งหมดที่มี (ให้ทีมบัญชีหรือใครก็ได้ช่วยแจกแจงในไฟล์นี้ล่วงหน้า) แล้วอัปโหลดกลับเข้ามาทีเดียว</div>
+        <div class="row">
+          <button class="btn secondary" id="dl-set-template">⬇ ดาวน์โหลดเทมเพลต</button>
+          <button class="btn secondary" id="upload-set-file-btn">⬆ อัปโหลดไฟล์ที่กรอกแล้ว</button>
+        </div>
+        <input type="file" id="upload-set-file" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+      <div style="margin-top:14px">${listHtml}</div>
+      <datalist id="catalog-codes">${catalogDatalist()}</datalist>
+    `;
+  }
+
+  const f = State.setForm;
+  const compRows = f.components.map((c, i) => `
+    <div class="row" style="align-items:flex-end;margin-bottom:8px">
+      <div style="flex:2">
+        <label>${i===0?'รหัสสินค้าย่อย':''}</label>
+        <input type="text" list="catalog-codes" placeholder="รหัสสินค้า" value="${esc(c.code)}" data-comp-code="${i}" style="margin-bottom:0">
+      </div>
+      <div style="flex:1">
+        <label>${i===0?'จำนวน':''}</label>
+        <input type="number" min="1" value="${c.qty}" data-comp-qty="${i}" style="margin-bottom:0">
+      </div>
+      <button type="button" class="btn ghost" style="width:auto;padding:11px 12px;margin-bottom:0;color:var(--danger)" data-comp-remove="${i}">✕</button>
+    </div>
+  `).join('');
+
+  return `
+    <h2 class="section">${f.editing ? 'แก้ไขเซทสินค้า' : 'เพิ่มเซทใหม่'}</h2>
+    <div class="card">
+      <label>วิธีจับคู่เซทนี้กับข้อมูลในออเดอร์</label>
+      <select id="set-matchby">
+        <option value="code" ${f.matchBy==='code'?'selected':''}>มีรหัส SKU ของเซท</option>
+        <option value="name" ${f.matchBy==='name'?'selected':''}>ไม่มี SKU — จับคู่ด้วยชื่อสินค้าแทน</option>
+      </select>
+      <label id="set-value-label">${f.matchBy==='name' ? 'ชื่อสินค้าตามที่ขึ้นในไฟล์ออเดอร์ (พิมพ์ให้ตรงเป๊ะ)' : 'รหัส SKU ของเซท (ตามที่ปรากฏในไฟล์ออเดอร์)'}</label>
+      <input type="text" ${f.matchBy==='code'?'list="catalog-codes"':''} id="set-value" value="${esc(f.matchValue)}">
+      <label>ชื่อเซท (ไว้แสดงในระบบ ไม่บังคับ)</label>
+      <input type="text" id="set-name" value="${esc(f.name)}">
+      <div class="muted" style="font-size:12px;margin:8px 0 4px">สินค้าย่อยที่ต้องหยิบ (ต่อ 1 เซท)</div>
+      <div id="comp-rows">${compRows}</div>
+      <button type="button" class="btn secondary" id="add-comp-btn" style="margin-top:4px">+ เพิ่มรายการย่อย</button>
+    </div>
+    <div class="row">
+      <button class="btn secondary" id="cancel-set-btn">ยกเลิก</button>
+      <button class="btn" id="save-set-btn">บันทึกเซท</button>
+    </div>
+    <datalist id="catalog-codes">${catalogDatalist()}</datalist>
+  `;
+}
+
+const SET_TEMPLATE_HEADERS = ['รหัสเซท (ถ้ามี SKU)', 'ชื่อสินค้าเซทตามที่ขึ้นในออเดอร์ (กรอกเฉพาะกรณีไม่มีรหัส SKU)', 'รหัสสินค้าย่อย', 'ชื่อสินค้าย่อย (ไม่บังคับ)', 'จำนวนต่อเซท'];
+
+function downloadSetTemplate(){
+  const wsData = [
+    SET_TEMPLATE_HEADERS,
+    ['SET001', '', 'P0005', 'โทนเนอร์กุหลาบ', 1],
+    ['SET001', '', 'P0008', 'เบบี้ไบรท์เซรั่ม', 2],
+    ['', 'เซทของขวัญปีใหม่ (ไม่มี SKU)', 'P0001', 'สบู่ข้าวออร์แกนิก', 3],
+    ['', 'เซทของขวัญปีใหม่ (ไม่มี SKU)', 'P0027', 'แชมพูออร์แกนิกอัญชัน', 1]
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'เซทสินค้า');
+  XLSX.writeFile(wb, 'เทมเพลตเซทสินค้า.xlsx');
+}
+
+function wireSets(){
+  if(!State.setForm){
+    const newBtn = document.getElementById('new-set-btn');
+    if(newBtn) newBtn.onclick = () => {
+      State.setForm = { matchBy:'code', matchValue:'', name: '', components:[{code:'',name:'',qty:1}], editing:false, origKey:null };
+      document.getElementById('main').innerHTML = renderSets();
+      wireSets();
+    };
+    document.querySelectorAll('[data-edit-set]').forEach(btn => {
+      btn.onclick = () => {
+        const [matchBy, matchValue] = btn.getAttribute('data-edit-set').split('|');
+        const def = State.setList.find(d => d.matchBy===matchBy && d.matchValue===matchValue);
+        if(!def) return;
+        State.setForm = { matchBy: def.matchBy, matchValue: def.matchValue, name: def.name||'', components: (def.components||[]).map(c=>({...c})), editing: true, origKey: setKey(def.matchBy, def.matchValue) };
+        document.getElementById('main').innerHTML = renderSets();
+        wireSets();
+      };
+    });
+    document.querySelectorAll('[data-del-set]').forEach(btn => {
+      btn.onclick = async () => {
+        const [matchBy, matchValue] = btn.getAttribute('data-del-set').split('|');
+        if(!confirm('ลบเซท "'+matchValue+'" ใช่หรือไม่?')) return;
+        await sDelete(setKey(matchBy, matchValue));
+        await refreshSets();
+        document.getElementById('main').innerHTML = renderSets();
+        wireSets();
+      };
+    });
+
+    const dlBtn = document.getElementById('dl-set-template');
+    if(dlBtn) dlBtn.onclick = downloadSetTemplate;
+
+    const upBtn = document.getElementById('upload-set-file-btn');
+    const upInput = document.getElementById('upload-set-file');
+    if(upBtn && upInput){
+      upBtn.onclick = () => upInput.click();
+      upInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        upBtn.disabled = true; upBtn.textContent = 'กำลังนำเข้า...';
+        try{
+          await importSetsFromFile(file);
+        }catch(err){
+          console.error(err);
+          toast('อ่านไฟล์ไม่สำเร็จ กรุณาใช้เทมเพลตที่ดาวน์โหลดไว้');
+        }
+        upBtn.disabled = false; upBtn.textContent = '⬆ อัปโหลดไฟล์ที่กรอกแล้ว';
+        upInput.value = '';
+        await refreshSets();
+        document.getElementById('main').innerHTML = renderSets();
+        wireSets();
+      };
+    }
+    return;
+  }
+
+  // form mode
+  const matchBySelect = document.getElementById('set-matchby');
+  if(matchBySelect){
+    matchBySelect.onchange = () => {
+      State.setForm.matchBy = matchBySelect.value;
+      document.getElementById('main').innerHTML = renderSets();
+      wireSets();
+    };
+  }
+  const valInput = document.getElementById('set-value');
+  if(valInput){ valInput.oninput = () => { State.setForm.matchValue = valInput.value.trim(); }; }
+
+  document.querySelectorAll('[data-comp-code]').forEach(inp => {
+    inp.oninput = () => { State.setForm.components[parseInt(inp.getAttribute('data-comp-code'))].code = inp.value.trim(); };
+  });
+  document.querySelectorAll('[data-comp-qty]').forEach(inp => {
+    inp.oninput = () => {
+      let v = parseInt(inp.value); if(isNaN(v)||v<1) v=1;
+      State.setForm.components[parseInt(inp.getAttribute('data-comp-qty'))].qty = v;
+    };
+  });
+  document.querySelectorAll('[data-comp-remove]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.getAttribute('data-comp-remove'));
+      if(State.setForm.components.length<=1){ toast('ต้องมีสินค้าย่อยอย่างน้อย 1 รายการ'); return; }
+      State.setForm.components.splice(idx,1);
+      document.getElementById('main').innerHTML = renderSets();
+      wireSets();
+    };
+  });
+  document.getElementById('add-comp-btn').onclick = () => {
+    State.setForm.components.push({code:'',name:'',qty:1});
+    document.getElementById('main').innerHTML = renderSets();
+    wireSets();
+  };
+  document.getElementById('cancel-set-btn').onclick = () => {
+    State.setForm = null;
+    document.getElementById('main').innerHTML = renderSets();
+    wireSets();
+  };
+  document.getElementById('save-set-btn').onclick = async () => {
+    const matchBy = document.getElementById('set-matchby').value;
+    const matchValue = document.getElementById('set-value').value.trim();
+    const name = document.getElementById('set-name').value.trim();
+    if(!matchValue){ toast(matchBy==='name' ? 'กรุณาใส่ชื่อสินค้าเซท' : 'กรุณาใส่รหัส SKU ของเซท'); return; }
+    const comps = State.setForm.components
+      .map(c => ({ code: c.code.trim(), name: (State.printCodes.find(p=>p.code===c.code.trim())||{}).name || c.name || '', qty: c.qty||1 }))
+      .filter(c => c.code);
+    if(comps.length===0){ toast('กรุณาใส่สินค้าย่อยอย่างน้อย 1 รายการ'); return; }
+    const btn = document.getElementById('save-set-btn');
+    btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+    const newKey = setKey(matchBy, matchValue);
+    if(State.setForm.origKey && State.setForm.origKey !== newKey){
+      await sDelete(State.setForm.origKey);
+    }
+    await sSetWithRetry(newKey, JSON.stringify({ matchBy, matchValue, name, components: comps }), true);
+    State.setForm = null;
+    await refreshSets();
+    toast('บันทึกเซทแล้ว');
+    document.getElementById('main').innerHTML = renderSets();
+    wireSets();
+  };
+}
+
+async function importSetsFromFile(file){
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(sheet, {defval:''});
+  if(!json.length){ toast('ไม่พบข้อมูลในไฟล์'); return; }
+  const headers = Object.keys(json[0]);
+  const find = (kw) => headers.find(h => h.toLowerCase().includes(kw)) || null;
+  const hCode = find('รหัสเซท') || headers[0];
+  const hName = find('ชื่อสินค้าเซท') || headers[1];
+  const hCompCode = find('รหัสสินค้าย่อย') || headers[2];
+  const hCompName = find('ชื่อสินค้าย่อย') || headers[3];
+  const hQty = find('จำนวน') || headers[4];
+
+  const grouped = {}; // key -> {matchBy,matchValue,name,components}
+  let skipped = 0;
+  json.forEach(r => {
+    const setCode = String(r[hCode]||'').trim();
+    const setName = String(r[hName]||'').trim();
+    const compCode = String(r[hCompCode]||'').trim();
+    if(!compCode || (!setCode && !setName)){ skipped++; return; }
+    const matchBy = setCode ? 'code' : 'name';
+    const matchValue = setCode || setName;
+    const key = matchBy+'|'+normName(matchValue);
+    if(!grouped[key]) grouped[key] = { matchBy, matchValue, name: setName || setCode, components: [] };
+    let qty = parseInt(r[hQty]);
+    if(isNaN(qty) || qty<=0) qty = 1;
+    const compName = String(r[hCompName]||'').trim();
+    const existing = grouped[key].components.find(c => c.code === compCode);
+    if(existing){ existing.qty += qty; }
+    else { grouped[key].components.push({ code: compCode, name: compName, qty }); }
+  });
+
+  const defs = Object.values(grouped);
+  if(defs.length===0){ toast('ไม่พบรายการเซทที่ถูกต้องในไฟล์ ตรวจสอบว่ากรอกตามเทมเพลต'); return; }
+
+  let done = 0;
+  for(const def of defs){
+    await sSetWithRetry(setKey(def.matchBy, def.matchValue), JSON.stringify(def), true);
+    done++;
+    await sleep(150);
+  }
+  toast('นำเข้าเซทสำเร็จ '+done+' เซท' + (skipped ? ' (ข้าม '+skipped+' แถวที่ข้อมูลไม่ครบ)' : ''));
+}
+
 
 /* ============ INIT ============ */
 (async function init(){
