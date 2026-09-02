@@ -928,6 +928,23 @@ async function handleScan(code){
   await saveOrder(State.date, o);
   const allDone = orderStatus(o)==='done';
   beep(allDone ? 'done' : 'success');
+
+  if(allDone){
+    showFeedback('success', '✅ แพ็คออเดอร์ '+o.orderId+' ครบแล้ว! ไปสแกนใบปะหน้าถัดไปได้เลย');
+    render();
+    // brief pause so staff sees the "done" state, then loop back to the label-scan screen automatically
+    setTimeout(async () => {
+      await stopCamera();
+      State.staffSub = 'list';
+      main_loading();
+      await refreshStaffList();
+      render();
+      const orderInp = document.getElementById('order-scan-input');
+      if(orderInp) orderInp.focus();
+    }, 1300);
+    return;
+  }
+
   showFeedback('success', '✓ '+it.name+' ('+it.qtyScanned+'/'+it.qtyRequired+')');
   render();
   // re-focus input after re-render if camera not active
