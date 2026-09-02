@@ -13,20 +13,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
 <style>
   :root{
-    --bg:#0e1318;
-    --surface:#171f26;
-    --surface2:#1f2a33;
-    --border:#2b3944;
-    --accent:#ffb020;
+    --bg:#f4f6f8;
+    --surface:#ffffff;
+    --surface2:#eef1f5;
+    --border:#dde3ea;
+    --accent:#e08a00;
     --accent-2:#ff7a1a;
-    --success:#2fbf71;
-    --success-dim:#173325;
-    --danger:#ff4d4f;
-    --danger-dim:#331a1b;
-    --warn:#ffb020;
-    --warn-dim:#332810;
-    --text:#eef2f6;
-    --muted:#8ea0ac;
+    --success:#1f9d5c;
+    --success-dim:#e4f7ec;
+    --danger:#e5484d;
+    --danger-dim:#fdeaea;
+    --warn:#e08a00;
+    --warn-dim:#fff2dc;
+    --text:#1b2430;
+    --muted:#65727e;
     --mono:'JetBrains Mono',ui-monospace,monospace;
     --disp:'Oswald',sans-serif;
     --body:'Inter',sans-serif;
@@ -79,7 +79,7 @@
   main{flex:1;padding:16px;padding-bottom:90px;}
 
   /* generic */
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(20,30,40,.06);}
   .btn{
     display:inline-flex;align-items:center;justify-content:center;gap:8px;
     font-family:var(--disp);font-weight:600;letter-spacing:.3px;text-transform:uppercase;font-size:14px;
@@ -112,6 +112,7 @@
   .order-item{
     display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
     border-left:4px solid var(--muted);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;
+    box-shadow:0 1px 3px rgba(20,30,40,.06);
   }
   .order-item.pending{border-left-color:var(--muted);}
   .order-item.progress{border-left-color:var(--warn);}
@@ -122,22 +123,22 @@
   .order-item .progtext{font-family:var(--mono);font-size:13px;font-weight:700;white-space:nowrap;}
 
   .stats-row{display:flex;gap:10px;margin-bottom:14px;}
-  .stat{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center;}
+  .stat{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;text-align:center;box-shadow:0 1px 3px rgba(20,30,40,.06);}
   .stat .num{font-family:var(--disp);font-size:22px;font-weight:700;}
   .stat .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;}
 
   /* order detail */
   .detail-header{margin-bottom:14px;}
   .back{background:none;border:none;color:var(--accent);font-family:var(--disp);font-weight:600;font-size:14px;cursor:pointer;padding:6px 0 14px;text-transform:uppercase;}
-  .item-row{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;}
+  .item-row{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(20,30,40,.07);}
   .item-row.done{border-color:var(--success);background:var(--success-dim);}
-  .item-photo{width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
-  .check{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;}
-  .item-row.done .check{background:var(--success);border-color:var(--success);color:#06210f;}
+  .item-photo{width:76px;height:76px;border-radius:12px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
+  .check{width:30px;height:30px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;}
+  .item-row.done .check{background:var(--success);border-color:var(--success);color:#ffffff;}
   .item-info{flex:1;min-width:0;}
-  .item-info .name{font-size:14px;font-weight:600;line-height:1.3;}
-  .item-info .code{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px;}
-  .item-qty{font-family:var(--mono);font-weight:700;font-size:15px;white-space:nowrap;}
+  .item-info .name{font-size:17px;font-weight:700;line-height:1.3;}
+  .item-info .code{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .item-qty{font-family:var(--mono);font-weight:700;font-size:19px;white-space:nowrap;}
   .item-qty.over{color:var(--warn);}
   .adjust{display:flex;gap:4px;margin-left:6px;}
   .adjust button{width:26px;height:26px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;line-height:1;cursor:pointer;}
@@ -165,6 +166,10 @@
   #reader{width:100%;}
   .scan-line{position:absolute;left:0;right:0;top:0;height:2px;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:scanmove 1.6s linear infinite;pointer-events:none;}
   @keyframes scanmove{0%{top:6%;}50%{top:94%;}100%{top:6%;}}
+
+  .order-scan-card{background:linear-gradient(135deg,var(--surface),var(--surface2));border:2px solid var(--accent);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .order-scan-card .osc-title{font-family:var(--disp);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+  .order-scan-card input[type=text]{margin-bottom:10px;font-family:var(--mono);font-size:16px;}
 
   .banner-done{
     background:var(--success-dim);border:1px solid var(--success);border-radius:12px;padding:18px;text-align:center;margin-bottom:14px;
@@ -686,6 +691,7 @@ function renderStaffList(){
         <div class="meta">
           <div class="oid">${esc(o.orderId)}</div>
           <div class="cust">${esc(o.customer||'-')}</div>
+          ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
         </div>
         <div style="text-align:right">
           <div class="progtext">${prog.scanned}/${prog.total} ชิ้น</div>
@@ -696,6 +702,12 @@ function renderStaffList(){
   }
 
   return `
+    <div class="order-scan-card">
+      <div class="osc-title">📦 สแกนใบปะหน้าเพื่อเปิดออเดอร์</div>
+      <div id="cam-wrap"><div id="reader"></div><div class="scan-line"></div></div>
+      <input type="text" id="order-scan-input" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      <button class="btn" id="order-cam-toggle">📷 เปิดกล้องสแกนใบปะหน้า</button>
+    </div>
     <div class="row" style="align-items:flex-end">
       <div>
         <label>วันที่รับออเดอร์</label>
@@ -714,6 +726,33 @@ function renderStaffList(){
 }
 
 function wireStaffList(){
+  const orderScanInput = document.getElementById('order-scan-input');
+  if(orderScanInput){
+    orderScanInput.onkeydown = (e) => {
+      if(e.key==='Enter'){
+        const v = orderScanInput.value.trim();
+        orderScanInput.value = '';
+        if(v) handleOrderLookupScan(v);
+      }
+    };
+  }
+  const orderCamToggle = document.getElementById('order-cam-toggle');
+  if(orderCamToggle){
+    orderCamToggle.onclick = async () => {
+      if(State.camActive){
+        await stopCamera();
+        orderCamToggle.textContent = '📷 เปิดกล้องสแกนใบปะหน้า';
+        orderCamToggle.disabled = false;
+      } else {
+        orderCamToggle.disabled = true;
+        orderCamToggle.textContent = 'กำลังเปิดกล้อง...';
+        const ok = await startCamera(handleOrderLookupScan);
+        orderCamToggle.disabled = false;
+        orderCamToggle.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนใบปะหน้า';
+      }
+    };
+  }
+
   const dsel = document.getElementById('date-select');
   if(dsel){
     dsel.onchange = async (e) => {
@@ -780,7 +819,7 @@ function renderDetail(){
     const done = it.qtyScanned >= it.qtyRequired;
     const over = it.qtyScanned > it.qtyRequired;
     const photo = State.photoCache[it.code];
-    const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : '';
+    const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : `<div class="item-photo" style="display:flex;align-items:center;justify-content:center;font-size:26px">🏷️</div>`;
     return `<div class="item-row ${done?'done':''}">
       <div class="check">${done?'✓':''}</div>
       ${photoHtml}
@@ -806,6 +845,7 @@ function renderDetail(){
     <div class="detail-header">
       <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
+      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
     </div>
     ${doneBanner}
     <h2 class="section">รายการที่ต้องแพ็ค</h2>
@@ -894,13 +934,32 @@ async function handleScan(code){
   setTimeout(() => { const inp = document.getElementById('scan-input'); if(inp) inp.focus(); }, 50);
 }
 
+async function handleOrderLookupScan(raw){
+  const code = raw.trim();
+  if(!code) return;
+  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code));
+  if(!match){
+    // fallback: loose contains-match, in case the scanned QR/barcode has extra characters around the number
+    match = State.orders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
+  }
+  if(!match){
+    beep('error');
+    showFeedback('danger', '✕ ไม่พบออเดอร์ที่ตรงกับ "'+code+'" ในวันที่ '+fmtDateTH(State.date));
+    return;
+  }
+  beep('success');
+  await stopCamera();
+  await openOrder(match.orderId);
+}
+
 /* ============ CAMERA SCANNER ============ */
 let scanCooldown = false;
-async function startCamera(){
+async function startCamera(onDecode){
+  onDecode = onDecode || handleScan;
   const wrap = document.getElementById('cam-wrap');
 
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    toast('เบราว์เซอร์/หน้าต่างนี้ไม่รองรับกล้อง (มักเกิดเมื่อเปิดผ่านหน้าพรีวิวฝังในแอปอื่น) กรุณาพิมพ์รหัสสินค้าในช่องด้านบน หรือใช้เครื่องยิงบาร์โค้ดแทน');
+    toast('เบราว์เซอร์/หน้าต่างนี้ไม่รองรับกล้อง (มักเกิดเมื่อเปิดผ่านหน้าพรีวิวฝังในแอปอื่น) กรุณาพิมพ์รหัสในช่องด้านบน หรือใช้เครื่องยิงบาร์โค้ดแทน');
     return false;
   }
   if(typeof Html5Qrcode === 'undefined'){
@@ -918,7 +977,7 @@ async function startCamera(){
       (decodedText) => {
         if(scanCooldown) return;
         scanCooldown = true;
-        handleScan(decodedText.trim());
+        onDecode(decodedText.trim());
         if(State.html5Qr){ try{ State.html5Qr.pause(true); }catch(e){} }
         setTimeout(() => {
           scanCooldown = false;
@@ -929,12 +988,12 @@ async function startCamera(){
     );
     return true;
   }catch(err){
-    let msg = 'เปิดกล้องไม่สำเร็จ — กรุณาพิมพ์รหัสสินค้า หรือใช้เครื่องยิงบาร์โค้ดแทน';
+    let msg = 'เปิดกล้องไม่สำเร็จ — กรุณาพิมพ์รหัส หรือใช้เครื่องยิงบาร์โค้ดแทน';
     const name = (err && err.name) || '';
     if(name === 'NotAllowedError'){
-      msg = 'ไม่ได้รับอนุญาตให้ใช้กล้อง (มักเกิดเมื่อเปิดหน้านี้ในโหมดพรีวิวฝังในแอปอื่น ซึ่งเบราว์เซอร์บล็อกกล้องไว้เพื่อความปลอดภัย) ลองเปิดไฟล์นี้เป็นหน้าเว็บเต็มจอโดยตรง หรือพิมพ์รหัสสินค้าแทนไปก่อน';
+      msg = 'ไม่ได้รับอนุญาตให้ใช้กล้อง (มักเกิดเมื่อเปิดหน้านี้ในโหมดพรีวิวฝังในแอปอื่น ซึ่งเบราว์เซอร์บล็อกกล้องไว้เพื่อความปลอดภัย) ลองเปิดไฟล์นี้เป็นหน้าเว็บเต็มจอโดยตรง หรือพิมพ์รหัสแทนไปก่อน';
     } else if(name === 'NotFoundError'){
-      msg = 'ไม่พบกล้องบนอุปกรณ์นี้ — พิมพ์รหัสสินค้า หรือใช้เครื่องยิงบาร์โค้ดแทน';
+      msg = 'ไม่พบกล้องบนอุปกรณ์นี้ — พิมพ์รหัส หรือใช้เครื่องยิงบาร์โค้ดแทน';
     }
     toast(msg);
     wrap.classList.remove('active');
@@ -993,6 +1052,7 @@ function renderAdmin(){
   const gCode = guess(['seller sku','sku']);
   const gQty = guess(['qty','quantity','จำนวน']);
   const gCust = guess(['nickname','buyer','ลูกค้า','ถึง']);
+  const gTrack = guess(['tracking','awb','พัสดุ','courier','เลขติดตาม','waybill']);
 
   const opts = (selectedIdx) => headers.map((h,i) => `<option value="${i}" ${i===selectedIdx?'selected':''}>${esc(h)}</option>`).join('');
 
@@ -1023,6 +1083,8 @@ function renderAdmin(){
       <select id="map-qty">${opts(gQty)}</select>
       <label>คอลัมน์ชื่อลูกค้า (ไม่บังคับ)</label>
       <select id="map-cust"><option value="-1">— ไม่ใช้ —</option>${opts(gCust)}</select>
+      <label>คอลัมน์หมายเลขพัสดุ/เลขติดตาม (ไม่บังคับ — ใส่ถ้าอยากให้สแกนใบปะหน้าแล้วเปิดออเดอร์อัตโนมัติได้)</label>
+      <select id="map-track"><option value="-1">— ไม่ใช้ —</option>${opts(gTrack)}</select>
       <div class="muted" style="font-size:12px;margin:10px 0 4px">ตัวอย่างข้อมูล</div>
       ${previewHtml}
     </div>
@@ -1104,7 +1166,9 @@ function wireAdmin(){
     const qi = parseInt(document.getElementById('map-qty').value);
     const custIdxVal = document.getElementById('map-cust').value;
     const custI = custIdxVal==='-1' ? -1 : parseInt(custIdxVal);
-    const oh = headers[oi], nh = headers[ni], ch = headers[ci], qh = headers[qi], custH = custI>=0 ? headers[custI] : null;
+    const trackIdxVal = document.getElementById('map-track').value;
+    const trackI = trackIdxVal==='-1' ? -1 : parseInt(trackIdxVal);
+    const oh = headers[oi], nh = headers[ni], ch = headers[ci], qh = headers[qi], custH = custI>=0 ? headers[custI] : null, trackH = trackI>=0 ? headers[trackI] : null;
 
     const setDefs = await loadAllSetDefs();
 
@@ -1119,7 +1183,7 @@ function wireAdmin(){
       if(!orderIdRaw || !codeRaw){ skippedInvalid++; return; }
       const orderId = orderIdRaw;
       const code = codeRaw;
-      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', items: [] };
+      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', items: [] };
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
       if(isNaN(qty) || qty<=0) qty = 1;
