@@ -1451,6 +1451,10 @@ function renderSets(){
         <label>${i===0?'รหัสสินค้าย่อย':''}</label>
         <input type="text" list="catalog-codes" placeholder="รหัสสินค้า" value="${esc(c.code)}" data-comp-code="${i}" style="margin-bottom:0">
       </div>
+      <div style="flex:2">
+        <label>${i===0?'ชื่อสินค้า':''}</label>
+        <input type="text" placeholder="ชื่อสินค้า (ใส่ให้ครบ ไม่งั้นจะโชว์เป็นรหัสแทน)" value="${esc(c.name||'')}" data-comp-name="${i}" style="margin-bottom:0">
+      </div>
       <div style="flex:1">
         <label>${i===0?'จำนวน':''}</label>
         <input type="number" min="1" value="${c.qty}" data-comp-qty="${i}" style="margin-bottom:0">
@@ -1568,7 +1572,23 @@ function wireSets(){
   if(valInput){ valInput.oninput = () => { State.setForm.matchValue = valInput.value.trim(); }; }
 
   document.querySelectorAll('[data-comp-code]').forEach(inp => {
-    inp.oninput = () => { State.setForm.components[parseInt(inp.getAttribute('data-comp-code'))].code = inp.value.trim(); };
+    inp.oninput = () => {
+      const idx = parseInt(inp.getAttribute('data-comp-code'));
+      const val = inp.value.trim();
+      State.setForm.components[idx].code = val;
+      // auto-fill the name field if this code is already known and the name is still empty
+      const nameInp = document.querySelector('[data-comp-name="'+idx+'"]');
+      if(nameInp && !nameInp.value.trim()){
+        const known = State.printCodes.find(p => p.code === val);
+        if(known && known.name){
+          nameInp.value = known.name;
+          State.setForm.components[idx].name = known.name;
+        }
+      }
+    };
+  });
+  document.querySelectorAll('[data-comp-name]').forEach(inp => {
+    inp.oninput = () => { State.setForm.components[parseInt(inp.getAttribute('data-comp-name'))].name = inp.value.trim(); };
   });
   document.querySelectorAll('[data-comp-qty]').forEach(inp => {
     inp.oninput = () => {
@@ -1601,9 +1621,10 @@ function wireSets(){
     const name = document.getElementById('set-name').value.trim();
     if(!matchValue){ toast(matchBy==='name' ? 'กรุณาใส่ชื่อสินค้าเซท' : 'กรุณาใส่รหัส SKU ของเซท'); return; }
     const comps = State.setForm.components
-      .map(c => ({ code: c.code.trim(), name: (State.printCodes.find(p=>p.code===c.code.trim())||{}).name || c.name || '', qty: c.qty||1 }))
+      .map(c => ({ code: c.code.trim(), name: c.name.trim() || (State.printCodes.find(p=>p.code===c.code.trim())||{}).name || '', qty: c.qty||1 }))
       .filter(c => c.code);
     if(comps.length===0){ toast('กรุณาใส่สินค้าย่อยอย่างน้อย 1 รายการ'); return; }
+    if(comps.some(c => !c.name)){ toast('กรุณาใส่ชื่อสินค้าให้ครบทุกรายการย่อย ไม่งั้นจะโชว์เป็นรหัสแทนชื่อตอนสแกน'); return; }
     const btn = document.getElementById('save-set-btn');
     btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
     const newKey = setKey(matchBy, matchValue);
