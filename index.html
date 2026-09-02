@@ -204,6 +204,9 @@
   .code-pick-row .cinfo .ccode{font-family:var(--mono);font-size:12px;color:var(--muted);}
   .code-pick-row .cqty{width:56px;flex-shrink:0;margin:0;padding:6px 8px;text-align:center;}
   .photo-btn{flex-shrink:0;background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:6px;padding:6px 9px;font-size:11px;cursor:pointer;font-family:var(--disp);text-transform:uppercase;}
+  .comp-photo-col{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 auto;}
+  .thumb-sm{width:38px;height:38px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
+  .thumb-sm-placeholder{width:38px;height:38px;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);}
   #label-sheet{display:none;}
   @media print{
     body *{visibility:hidden;}
@@ -1526,10 +1529,21 @@ function renderSets(){
   }
 
   const f = State.setForm;
-  const compRows = f.components.map((c, i) => `
+  const compRows = f.components.map((c, i) => {
+    const photo = c.code ? State.photoCache[c.code] : null;
+    const thumbHtml = photo
+      ? `<img class="thumb-sm" src="${photo}" data-comp-thumb="${i}">`
+      : `<div class="thumb-sm-placeholder" data-comp-thumb="${i}">🏷️</div>`;
+    return `
     <div class="row" style="align-items:flex-end;margin-bottom:8px">
+      <div class="comp-photo-col">
+        ${i===0?'<label>รูป</label>':''}
+        ${thumbHtml}
+        <button type="button" class="photo-btn" data-comp-photo-btn="${i}">📷</button>
+        <input type="file" accept="image/*" capture="environment" style="display:none" data-comp-photo-input="${i}">
+      </div>
       <div style="flex:2">
-        <label>${i===0?'รหัสสินค้าย่อย':''}</label>
+        <label>${i===0?'รหัสสินค้าย่อย (ID)':''}</label>
         <input type="text" list="catalog-codes" placeholder="รหัสสินค้า" value="${esc(c.code)}" data-comp-code="${i}" style="margin-bottom:0">
       </div>
       <div style="flex:2">
@@ -1542,7 +1556,11 @@ function renderSets(){
       </div>
       <button type="button" class="btn ghost" style="width:auto;padding:11px 12px;margin-bottom:0;color:var(--danger)" data-comp-remove="${i}">✕</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+  const totalQtyAll = f.components.reduce((s,c) => s + (c.qty||0), 0);
+  const totalTypes = f.components.filter(c => c.code.trim()).length;
 
   return `
     <h2 class="section">${f.editing ? 'แก้ไขเซทสินค้า' : 'เพิ่มเซทใหม่'}</h2>
@@ -1556,7 +1574,7 @@ function renderSets(){
       <input type="text" ${f.matchBy==='code'?'list="catalog-codes"':''} id="set-value" value="${esc(f.matchValue)}">
       <label>ชื่อเซท (ไว้แสดงในระบบ ไม่บังคับ)</label>
       <input type="text" id="set-name" value="${esc(f.name)}">
-      <div class="muted" style="font-size:12px;margin:8px 0 4px">สินค้าย่อยที่ต้องหยิบ (ต่อ 1 เซท)</div>
+      <div class="muted" style="font-size:12px;margin:8px 0 4px" id="comp-summary">สินค้าย่อยที่ต้องหยิบ (ต่อ 1 เซท) — ใส่รูปแนบแต่ละ ID ได้เลย — รวม ${totalQtyAll} ชิ้น จาก ${totalTypes} รายการ (ID)</div>
       <div id="comp-rows">${compRows}</div>
       <button type="button" class="btn secondary" id="add-comp-btn" style="margin-top:4px">+ เพิ่มรายการย่อย</button>
     </div>
@@ -1652,6 +1670,14 @@ function wireSets(){
   const valInput = document.getElementById('set-value');
   if(valInput){ valInput.oninput = () => { State.setForm.matchValue = valInput.value.trim(); }; }
 
+  function updateCompSummary(){
+    const el = document.getElementById('comp-summary');
+    if(!el || !State.setForm) return;
+    const totalQtyAll = State.setForm.components.reduce((s,c) => s + (c.qty||0), 0);
+    const totalTypes = State.setForm.components.filter(c => c.code.trim()).length;
+    el.textContent = 'สินค้าย่อยที่ต้องหยิบ (ต่อ 1 เซท) — ใส่รูปแนบแต่ละ ID ได้เลย — รวม '+totalQtyAll+' ชิ้น จาก '+totalTypes+' รายการ (ID)';
+  }
+
   document.querySelectorAll('[data-comp-code]').forEach(inp => {
     inp.oninput = () => {
       const idx = parseInt(inp.getAttribute('data-comp-code'));
@@ -1666,6 +1692,21 @@ function wireSets(){
           State.setForm.components[idx].name = known.name;
         }
       }
+      updateCompSummary();
+    };
+    inp.onblur = async () => {
+      const idx = parseInt(inp.getAttribute('data-comp-code'));
+      const code = State.setForm.components[idx].code;
+      const thumbEl = document.querySelector('[data-comp-thumb="'+idx+'"]');
+      if(!thumbEl || !code) return;
+      const photo = await getPhotoForCode(code);
+      if(photo){
+        const img = document.createElement('img');
+        img.className = 'thumb-sm';
+        img.setAttribute('data-comp-thumb', idx);
+        img.src = photo;
+        thumbEl.replaceWith(img);
+      }
     };
   });
   document.querySelectorAll('[data-comp-name]').forEach(inp => {
@@ -1675,6 +1716,43 @@ function wireSets(){
     inp.oninput = () => {
       let v = parseInt(inp.value); if(isNaN(v)||v<1) v=1;
       State.setForm.components[parseInt(inp.getAttribute('data-comp-qty'))].qty = v;
+      updateCompSummary();
+    };
+  });
+  document.querySelectorAll('[data-comp-photo-btn]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = btn.getAttribute('data-comp-photo-btn');
+      const input = document.querySelector('[data-comp-photo-input="'+idx+'"]');
+      if(input) input.click();
+    };
+  });
+  document.querySelectorAll('[data-comp-photo-input]').forEach(inp => {
+    inp.onchange = async (e) => {
+      const idx = parseInt(inp.getAttribute('data-comp-photo-input'));
+      const code = (State.setForm.components[idx].code||'').trim();
+      const file = e.target.files[0];
+      if(!file) return;
+      if(!code){ toast('กรุณาใส่รหัสสินค้าย่อย (ID) ก่อนแนบรูป'); inp.value=''; return; }
+      const btn = document.querySelector('[data-comp-photo-btn="'+idx+'"]');
+      if(btn){ btn.textContent='...'; btn.disabled = true; }
+      try{
+        const dataUrl = await resizeImageFile(file, 240, 0.72);
+        await sSetWithRetry(photoKey(code), dataUrl, true);
+        State.photoCache[code] = dataUrl;
+        const thumbEl = document.querySelector('[data-comp-thumb="'+idx+'"]');
+        if(thumbEl){
+          const img = document.createElement('img');
+          img.className = 'thumb-sm';
+          img.setAttribute('data-comp-thumb', idx);
+          img.src = dataUrl;
+          thumbEl.replaceWith(img);
+        }
+        toast('แนบรูปสินค้า '+code+' แล้ว');
+      }catch(err){
+        toast('อัปโหลดรูปไม่สำเร็จ ลองใหม่อีกครั้ง');
+      }
+      if(btn){ btn.textContent='📷'; btn.disabled=false; }
+      inp.value='';
     };
   });
   document.querySelectorAll('[data-comp-remove]').forEach(btn => {
