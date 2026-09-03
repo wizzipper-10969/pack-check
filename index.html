@@ -1120,7 +1120,16 @@ async function startCamera(onDecode){
   try{
     await State.html5Qr.start(
       { facingMode: 'environment' },
-      { fps: 12, qrbox: { width: 260, height: 140 } },
+      {
+        fps: 12,
+        qrbox: (viewfinderW, viewfinderH) => {
+          // square box sized to the smaller viewfinder dimension — big enough to
+          // frame a QR code fully, and still wide enough to catch a 1D barcode
+          const edge = Math.min(viewfinderW, viewfinderH);
+          const size = Math.floor(edge * 0.75);
+          return { width: size, height: size };
+        }
+      },
       (decodedText) => {
         if(scanCooldown) return;
         scanCooldown = true;
