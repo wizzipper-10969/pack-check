@@ -408,6 +408,8 @@ const State = {
   printQty: {}, // code -> qty to print
   printSearch: '',
   photoCache: {}, // code -> dataURL or null
+  dailySummary: [], // [{code,name,qty}] — total ordered qty per product for the selected date
+  summaryExpanded: false,
   pendingPhotos: [], // [{id, dataUrl, fileName}] unmatched bulk-upload photos awaiting manual assignment
   setList: [], // [{code,name,components:[{code,name,qty}]}]
   setForm: null // working draft {code,name,components:[{code,name,qty}]} or null when not editing
@@ -672,6 +674,25 @@ async function refreshStaffList(){
   } else {
     State.orders = [];
   }
+
+  // aggregate total ordered qty per product across today's orders, for the quick summary
+  // strip shown to staff (so they can see at a glance what's selling / what to batch-pick)
+  const map = {}; // code -> {name, qty}
+  State.orders.forEach(o => {
+    o.items.forEach(it => {
+      if(!map[it.code]) map[it.code] = { code: it.code, name: it.name || it.code, qty: 0 };
+      map[it.code].qty += it.qtyRequired;
+    });
+  });
+  const summary = Object.values(map).sort((a,b) => b.qty - a.qty);
+  State.dailySummary = summary;
+
+  // preload thumbnails for the summary so they're ready by the time it's rendered
+  const toLoad = summary.filter(it => !(it.code in State.photoCache));
+  await mapWithConcurrency(toLoad, 6, async it => {
+    const v = await sGetWithRetry(photoKey(it.code), true);
+    State.photoCache[it.code] = v || null;
+  });
 }
 
 function renderStaffList(){
@@ -682,6 +703,10 @@ function renderStaffList(){
   const total = State.orders.length;
   const done = State.orders.filter(o => orderStatus(o)==='done').length;
   const progress = State.orders.filter(o => orderStatus(o)==='progress').length;
+  const piecesRemaining = State.orders.reduce((sum, o) => {
+    const p = orderProgress(o);
+    return sum + Math.max(0, p.total - p.scanned);
+  }, 0);
 
   const filtered = State.orders.filter(o => {
     if(!State.search) return true;
@@ -713,6 +738,31 @@ function renderStaffList(){
     }).join('');
   }
 
+  const summaryRows = State.dailySummary.map(it => {
+    const photo = State.photoCache[it.code];
+    const thumb = photo
+      ? `<img class="thumb-sm" src="${photo}" style="width:44px;height:44px">`
+      : `<div class="thumb-sm-placeholder" style="width:44px;height:44px;font-size:18px">🏷️</div>`;
+    return `<div class="row" style="align-items:center;margin-bottom:10px;gap:10px">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.name)}</div>
+        <div class="mono muted" style="font-size:11px">${esc(it.code)}</div>
+      </div>
+      <div style="font-family:var(--disp);font-weight:700;font-size:19px;color:var(--accent);flex-shrink:0">${it.qty}</div>
+    </div>`;
+  }).join('');
+
+  const summaryCard = total>0 ? `
+    <div class="card" style="margin-bottom:14px">
+      <div id="summary-toggle" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+        <div style="font-weight:700">🛒 สรุปสินค้าที่ต้องแพ็ควันนี้ <span class="muted" style="font-weight:400">(${State.dailySummary.length} รายการ)</span></div>
+        <div class="muted" style="font-size:13px">${State.summaryExpanded ? 'ซ่อน ▲' : 'ดูทั้งหมด ▼'}</div>
+      </div>
+      ${State.summaryExpanded ? `<div style="margin-top:12px;max-height:400px;overflow-y:auto">${summaryRows}</div>` : ''}
+    </div>
+  ` : '';
+
   return `
     <div class="order-scan-card">
       <div class="osc-title">📦 สแกนใบปะหน้าเพื่อเปิดออเดอร์</div>
@@ -732,7 +782,9 @@ function renderStaffList(){
       <div class="stat"><div class="num">${total}</div><div class="lbl">ออเดอร์ทั้งหมด</div></div>
       <div class="stat"><div class="num" style="color:var(--warn)">${progress}</div><div class="lbl">กำลังแพ็ค</div></div>
       <div class="stat"><div class="num" style="color:var(--success)">${done}</div><div class="lbl">ครบแล้ว</div></div>
+      <div class="stat"><div class="num" style="color:var(--danger)">${piecesRemaining}</div><div class="lbl">ชิ้นที่เหลือต้องแพ็ค</div></div>
     </div>
+    ${summaryCard}
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
     <div id="order-list">${listHtml}</div>
   `;
@@ -794,6 +846,14 @@ function wireStaffList(){
   const exportBtn = document.getElementById('export-stock-btn');
   if(exportBtn){
     exportBtn.onclick = () => exportStockReport(State.date, State.orders);
+  }
+  const summaryToggle = document.getElementById('summary-toggle');
+  if(summaryToggle){
+    summaryToggle.onclick = () => {
+      State.summaryExpanded = !State.summaryExpanded;
+      document.getElementById('main').innerHTML = renderStaffList();
+      wireStaffList();
+    };
   }
   const sb = document.getElementById('search-box');
   if(sb){
