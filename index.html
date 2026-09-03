@@ -208,21 +208,6 @@
   .thumb-sm{width:38px;height:38px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
   .thumb-sm-placeholder{width:38px;height:38px;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);}
   #label-sheet{display:none;}
-  @media print{
-    @page{margin:6mm;}
-    body *{visibility:hidden;}
-    #label-sheet, #label-sheet *{visibility:visible;}
-    #label-sheet{display:block !important;position:static;width:100%;margin:0;padding:0;}
-    .label{
-      page-break-after:always;page-break-inside:avoid;
-      width:100%;height:100vh;max-width:none;
-      margin:0;padding:0;border:none;
-    }
-    .label:last-child{page-break-after:auto;}
-    .label .lname{font-size:26px;max-height:none;-webkit-line-clamp:unset;margin-bottom:10px;}
-    .label svg{width:92%;height:auto;max-height:65vh;}
-    .label .lcode{font-size:22px;margin-top:10px;}
-  }
   .label{
     display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
     width:190px;height:110px;border:1px dashed #999;margin:4px;padding:6px;box-sizing:border-box;
@@ -231,6 +216,21 @@
   .label .lname{font-size:11px;font-weight:700;text-align:center;line-height:1.2;max-height:26px;overflow:hidden;margin-bottom:2px;}
   .label svg{max-width:100%;}
   .label .lcode{font-size:11px;font-family:monospace;letter-spacing:1px;margin-top:2px;}
+  @media print{
+    @page{margin:6mm;}
+    body *{visibility:hidden;}
+    #label-sheet, #label-sheet *{visibility:visible;}
+    #label-sheet{display:block !important;position:static;width:100%;margin:0;padding:0;}
+    .label{
+      display:flex;page-break-after:always;page-break-inside:avoid;
+      width:100%;height:100vh;max-width:none;
+      margin:0;padding:0;border:none;
+    }
+    .label:last-child{page-break-after:auto;}
+    .label .lname{font-size:26px;max-height:none;overflow:visible;margin-bottom:10px;}
+    .label svg{width:92%;height:auto;max-height:65vh;}
+    .label .lcode{font-size:22px;margin-top:10px;}
+  }
 </style>
 </head>
 <body>
