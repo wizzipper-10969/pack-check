@@ -1064,8 +1064,14 @@ function renderAdmin(){
 
   const {headers, rows, date, mergeMode, skipRows} = State.uploadParsed;
   const guess = (keywords) => {
-    const idx = headers.findIndex(h => keywords.some(k => h.toLowerCase().includes(k)));
-    return idx>=0 ? idx : 0;
+    // try each keyword in priority order across ALL headers before falling back
+    // to a later, more generic keyword — e.g. an exact "seller sku" column should
+    // win over a column that merely contains the generic substring "sku" (like "SKU ID")
+    for(const k of keywords){
+      const idx = headers.findIndex(h => h.toLowerCase().includes(k));
+      if(idx>=0) return idx;
+    }
+    return 0;
   };
   const gOrder = guess(['order id','order','ออเดอร์']);
   const gName = guess(['product name','ชื่อสินค้า','name']);
@@ -1516,7 +1522,7 @@ function renderSets(){
       <button class="btn" id="new-set-btn">+ เพิ่มเซทใหม่ (ทีละรายการ)</button>
       <div class="card" style="margin-top:12px">
         <div style="font-weight:700;margin-bottom:6px">นำเข้าหลายเซทพร้อมกันจากไฟล์ Excel</div>
-        <div class="muted" style="font-size:13px;margin-bottom:10px;line-height:1.6">ดาวน์โหลดเทมเพลต กรอกรายการเซททั้งหมดที่มี (ให้ทีมบัญชีหรือใครก็ได้ช่วยแจกแจงในไฟล์นี้ล่วงหน้า) แล้วอัปโหลดกลับเข้ามาทีเดียว</div>
+        <div class="muted" style="font-size:13px;margin-bottom:10px;line-height:1.6">ดาวน์โหลดเทมเพลต กรอกรายการเซททั้งหมดที่มี (ให้ทีมบัญชีหรือใครก็ได้ช่วยแจกแจงในไฟล์นี้ล่วงหน้า) แล้วอัปโหลดกลับเข้ามาทีเดียว — หรือจะอัปโหลดไฟล์ "Product export" ที่ดาวน์โหลดจาก TikTok Shop โดยตรงก็ได้เลย ไม่ต้องแปลงฟอร์แมตก่อน ระบบจะจดจำชื่อ+รหัสของสินค้าทุกตัว (ทั้งเดี่ยวและเซท) ให้อัตโนมัติ เหลือแค่ไปแนบรูปทีหลัง</div>
         <div class="row">
           <button class="btn secondary" id="dl-set-template">⬇ ดาวน์โหลดเทมเพลต</button>
           <button class="btn secondary" id="upload-set-file-btn">⬆ อัปโหลดไฟล์ที่กรอกแล้ว</button>
@@ -1803,36 +1809,79 @@ async function importSetsFromFile(file){
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
   const sheet = wb.Sheets[wb.SheetNames[0]];
-  const json = XLSX.utils.sheet_to_json(sheet, {defval:''});
-  if(!json.length){ toast('ไม่พบข้อมูลในไฟล์'); return; }
-  const headers = Object.keys(json[0]);
-  const find = (kw) => headers.find(h => h.toLowerCase().includes(kw)) || null;
-  const hCode = find('รหัสเซท') || headers[0];
-  const hName = find('ชื่อสินค้าเซท') || headers[1];
-  const hCompCode = find('รหัสสินค้าย่อย') || headers[2];
-  const hCompName = find('ชื่อสินค้าย่อย') || headers[3];
-  const hQty = find('จำนวน') || headers[4];
+  // read as raw rows (not header-keyed) since the native TikTok product export re-uses
+  // the same column header ("SKU") five times for each set-component slot — a header-keyed
+  // parse would silently collide and drop all but the last one
+  const rows2d = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+  if(!rows2d.length){ toast('ไม่พบข้อมูลในไฟล์'); return; }
+  const headerRow = rows2d[0].map(h => String(h||'').trim());
+  const dataRows = rows2d.slice(1).filter(r => r.some(c => String(c||'').trim()!==''));
 
-  const grouped = {}; // key -> {matchBy,matchValue,name,components}
+  // detect the native "Tiktok_Onlineproducts" export: one row per product/variant SKU, with
+  // its own name/code/stock/price, plus up to 5 inline "component" slots for combo/set SKUs
+  const isWideProductExport = headerRow.some(h => h.includes('ในเซทประกอบด้วย')) && headerRow.some(h => h.includes('Product ID'));
+
+  let defs = [];
   let skipped = 0;
-  json.forEach(r => {
-    const setCode = String(r[hCode]||'').trim();
-    const setName = String(r[hName]||'').trim();
-    const compCode = String(r[hCompCode]||'').trim();
-    if(!compCode || (!setCode && !setName)){ skipped++; return; }
-    const matchBy = setCode ? 'code' : 'name';
-    const matchValue = setCode || setName;
-    const key = matchBy+'|'+normName(matchValue);
-    if(!grouped[key]) grouped[key] = { matchBy, matchValue, name: setName || setCode, components: [] };
-    let qty = parseInt(r[hQty]);
-    if(isNaN(qty) || qty<=0) qty = 1;
-    const compName = String(r[hCompName]||'').trim();
-    const existing = grouped[key].components.find(c => c.code === compCode);
-    if(existing){ existing.qty += qty; }
-    else { grouped[key].components.push({ code: compCode, name: compName, qty }); }
-  });
 
-  const defs = Object.values(grouped);
+  if(isWideProductExport){
+    // pass 1: build a code -> friendly name lookup from every row (name + variant option, if any)
+    const nameByCode = {};
+    dataRows.forEach(r => {
+      const name = String(r[0]||'').trim();
+      const option = String(r[2]||'').trim();
+      const sku = String(r[3]||'').trim();
+      if(!sku) return;
+      nameByCode[sku] = option ? name+' ('+option+')' : name;
+    });
+    // pass 2: one set definition per row — real combos use their listed components; standalone
+    // products get a 1-item self-referencing definition so their name/photo can still be registered
+    dataRows.forEach(r => {
+      const sku = String(r[3]||'').trim();
+      if(!sku){ skipped++; return; }
+      const ownName = nameByCode[sku] || sku;
+      const comps = [];
+      for(let slot=0; slot<5; slot++){
+        const base = 6 + slot*3; // [componentProductId, componentSKU, qty]
+        const compSku = String(r[base+1]||'').trim();
+        if(!compSku) continue;
+        let qty = parseInt(r[base+2]);
+        if(isNaN(qty) || qty<=0) qty = 1;
+        comps.push({ code: compSku, name: nameByCode[compSku] || compSku, qty });
+      }
+      if(comps.length===0) comps.push({ code: sku, name: ownName, qty: 1 });
+      defs.push({ matchBy:'code', matchValue: sku, name: ownName, components: comps });
+    });
+  } else {
+    const headers = headerRow;
+    const json = dataRows.map(r => { const o={}; headers.forEach((h,i)=>o[h]=r[i]!==undefined?r[i]:''); return o; });
+    const find = (kw) => headers.find(h => h.toLowerCase().includes(kw)) || null;
+    const hCode = find('รหัสเซท') || headers[0];
+    const hName = find('ชื่อสินค้าเซท') || headers[1];
+    const hCompCode = find('รหัสสินค้าย่อย') || headers[2];
+    const hCompName = find('ชื่อสินค้าย่อย') || headers[3];
+    const hQty = find('จำนวน') || headers[4];
+
+    const grouped = {}; // key -> {matchBy,matchValue,name,components}
+    json.forEach(r => {
+      const setCode = String(r[hCode]||'').trim();
+      const setName = String(r[hName]||'').trim();
+      const compCode = String(r[hCompCode]||'').trim();
+      if(!compCode || (!setCode && !setName)){ skipped++; return; }
+      const matchBy = setCode ? 'code' : 'name';
+      const matchValue = setCode || setName;
+      const key = matchBy+'|'+normName(matchValue);
+      if(!grouped[key]) grouped[key] = { matchBy, matchValue, name: setName || setCode, components: [] };
+      let qty = parseInt(r[hQty]);
+      if(isNaN(qty) || qty<=0) qty = 1;
+      const compName = String(r[hCompName]||'').trim();
+      const existing = grouped[key].components.find(c => c.code === compCode);
+      if(existing){ existing.qty += qty; }
+      else { grouped[key].components.push({ code: compCode, name: compName, qty }); }
+    });
+    defs = Object.values(grouped);
+  }
+
   if(defs.length===0){ toast('ไม่พบรายการเซทที่ถูกต้องในไฟล์ ตรวจสอบว่ากรอกตามเทมเพลต'); return; }
 
   let done = 0;
@@ -1841,7 +1890,7 @@ async function importSetsFromFile(file){
     done++;
     await sleep(150);
   }
-  toast('นำเข้าเซทสำเร็จ '+done+' เซท' + (skipped ? ' (ข้าม '+skipped+' แถวที่ข้อมูลไม่ครบ)' : ''));
+  toast('นำเข้าสินค้าสำเร็จ '+done+' รายการ' + (skipped ? ' (ข้าม '+skipped+' แถวที่ข้อมูลไม่ครบ)' : ''));
 }
 
 
