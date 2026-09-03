@@ -205,8 +205,8 @@
   .code-pick-row .cqty{width:56px;flex-shrink:0;margin:0;padding:6px 8px;text-align:center;}
   .photo-btn{flex-shrink:0;background:var(--surface2);border:1px solid var(--border);color:var(--accent);border-radius:6px;padding:6px 9px;font-size:11px;cursor:pointer;font-family:var(--disp);text-transform:uppercase;}
   .comp-photo-col{display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 auto;}
-  .thumb-sm{width:38px;height:38px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
-  .thumb-sm-placeholder{width:38px;height:38px;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);}
+  .thumb-sm{width:38px;height:38px;aspect-ratio:1/1;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
+  .thumb-sm-placeholder{width:38px;height:38px;aspect-ratio:1/1;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--muted);}
   #label-sheet{display:none;}
   .label{
     display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
@@ -749,8 +749,8 @@ function renderStaffList(){
   const summaryRows = State.dailySummary.map(it => {
     const photo = State.photoCache[it.code];
     const thumb = photo
-      ? `<img class="thumb-sm" src="${photo}" style="width:44px;height:44px">`
-      : `<div class="thumb-sm-placeholder" style="width:44px;height:44px;font-size:18px">🏷️</div>`;
+      ? `<img class="thumb-sm" src="${photo}" style="width:44px;height:44px;aspect-ratio:1/1">`
+      : `<div class="thumb-sm-placeholder" style="width:44px;height:44px;aspect-ratio:1/1;font-size:18px">🏷️</div>`;
     return `<div class="row" style="align-items:center;margin-bottom:10px;gap:10px">
       ${thumb}
       <div style="flex:1;min-width:0">
