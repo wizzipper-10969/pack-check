@@ -749,8 +749,8 @@ function renderStaffList(){
   const summaryRows = State.dailySummary.map(it => {
     const photo = State.photoCache[it.code];
     const thumb = photo
-      ? `<img class="thumb-sm" src="${photo}" style="width:44px;height:44px;aspect-ratio:1/1">`
-      : `<div class="thumb-sm-placeholder" style="width:44px;height:44px;aspect-ratio:1/1;font-size:18px">🏷️</div>`;
+      ? `<img class="thumb-sm" src="${photo}" style="width:48px;height:48px;aspect-ratio:1/1;object-fit:cover;border-radius:8px">`
+      : `<div class="thumb-sm-placeholder" style="width:48px;height:48px;aspect-ratio:1/1;font-size:18px;border-radius:8px">🏷️</div>`;
     return `<div class="row" style="align-items:center;margin-bottom:10px;gap:10px">
       ${thumb}
       <div style="flex:1;min-width:0">
