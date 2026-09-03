@@ -688,12 +688,22 @@ async function refreshStaffList(){
   const summary = Object.values(map).sort((a,b) => b.qty - a.qty);
   State.dailySummary = summary;
 
-  // preload thumbnails for the summary so they're ready by the time it's rendered
+  // preload thumbnails for the summary in the BACKGROUND — fetching each one is a network
+  // round trip, and awaiting all of them here was blocking the whole page from showing
+  // anything until every photo arrived (slow/flaky connections made this feel like the
+  // app had frozen). Kick it off without awaiting, and patch the screen once it's done.
   const toLoad = summary.filter(it => !(it.code in State.photoCache));
-  await mapWithConcurrency(toLoad, 6, async it => {
-    const v = await sGetWithRetry(photoKey(it.code), true);
-    State.photoCache[it.code] = v || null;
-  });
+  if(toLoad.length){
+    mapWithConcurrency(toLoad, 6, async it => {
+      const v = await sGetWithRetry(photoKey(it.code), true);
+      State.photoCache[it.code] = v || null;
+    }).then(() => {
+      if(State.view==='staff' && State.staffSub==='list'){
+        document.getElementById('main').innerHTML = renderStaffList();
+        wireStaffList();
+      }
+    });
+  }
 }
 
 function renderStaffList(){
@@ -704,10 +714,7 @@ function renderStaffList(){
   const total = State.orders.length;
   const done = State.orders.filter(o => orderStatus(o)==='done').length;
   const progress = State.orders.filter(o => orderStatus(o)==='progress').length;
-  const piecesRemaining = State.orders.reduce((sum, o) => {
-    const p = orderProgress(o);
-    return sum + Math.max(0, p.total - p.scanned);
-  }, 0);
+  const ordersRemaining = total - done;
 
   const filtered = State.orders.filter(o => {
     if(!State.search) return true;
@@ -785,7 +792,7 @@ function renderStaffList(){
       <div class="stat"><div class="num">${total}</div><div class="lbl">ออเดอร์ทั้งหมด</div></div>
       <div class="stat"><div class="num" style="color:var(--warn)">${progress}</div><div class="lbl">กำลังแพ็ค</div></div>
       <div class="stat"><div class="num" style="color:var(--success)">${done}</div><div class="lbl">ครบแล้ว</div></div>
-      <div class="stat"><div class="num" style="color:var(--danger)">${piecesRemaining}</div><div class="lbl">ชิ้นที่เหลือต้องแพ็ค</div></div>
+      <div class="stat"><div class="num" style="color:var(--danger)">${ordersRemaining}</div><div class="lbl">ออเดอร์ที่เหลือต้องแพ็ค</div></div>
     </div>
     ${summaryCard}
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
