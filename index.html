@@ -675,13 +675,14 @@ async function refreshStaffList(){
     State.orders = [];
   }
 
-  // aggregate total ordered qty per product across today's orders, for the quick summary
-  // strip shown to staff (so they can see at a glance what's selling / what to batch-pick)
+  // aggregate total PACKED (scanned) qty per product across today's orders — this reflects
+  // what actually shipped out so far, not what was merely ordered
   const map = {}; // code -> {name, qty}
   State.orders.forEach(o => {
     o.items.forEach(it => {
+      if(!it.qtyScanned) return;
       if(!map[it.code]) map[it.code] = { code: it.code, name: it.name || it.code, qty: 0 };
-      map[it.code].qty += it.qtyRequired;
+      map[it.code].qty += it.qtyScanned;
     });
   });
   const summary = Object.values(map).sort((a,b) => b.qty - a.qty);
@@ -756,10 +757,12 @@ function renderStaffList(){
   const summaryCard = total>0 ? `
     <div class="card" style="margin-bottom:14px">
       <div id="summary-toggle" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer">
-        <div style="font-weight:700">🛒 สรุปสินค้าที่ต้องแพ็ควันนี้ <span class="muted" style="font-weight:400">(${State.dailySummary.length} รายการ)</span></div>
+        <div style="font-weight:700">✅ สรุปสินค้าที่แพ็คออกไปแล้ว <span class="muted" style="font-weight:400">(${State.dailySummary.length} รายการ)</span></div>
         <div class="muted" style="font-size:13px">${State.summaryExpanded ? 'ซ่อน ▲' : 'ดูทั้งหมด ▼'}</div>
       </div>
-      ${State.summaryExpanded ? `<div style="margin-top:12px;max-height:400px;overflow-y:auto">${summaryRows}</div>` : ''}
+      ${State.summaryExpanded ? (State.dailySummary.length
+          ? `<div style="margin-top:12px;max-height:400px;overflow-y:auto">${summaryRows}</div>`
+          : `<div class="muted" style="font-size:13px;margin-top:10px">ยังไม่มีสินค้าที่สแกนแพ็คเลยในวันนี้</div>`) : ''}
     </div>
   ` : '';
 
