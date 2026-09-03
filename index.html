@@ -717,6 +717,7 @@ function renderStaffList(){
         <select id="date-select">${dateOptions}</select>
       </div>
       <button class="btn secondary" id="clear-date-btn" style="max-width:130px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>🗑 เคลียร์วันนี้</button>
+      <button class="btn secondary" id="export-stock-btn" style="max-width:170px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>📤 Export สรุปสต็อก</button>
     </div>
     <div class="stats-row">
       <div class="stat"><div class="num">${total}</div><div class="lbl">ออเดอร์ทั้งหมด</div></div>
@@ -781,6 +782,10 @@ function wireStaffList(){
       wireStaffList();
     };
   }
+  const exportBtn = document.getElementById('export-stock-btn');
+  if(exportBtn){
+    exportBtn.onclick = () => exportStockReport(State.date, State.orders);
+  }
   const sb = document.getElementById('search-box');
   if(sb){
     sb.oninput = (e) => {
@@ -795,6 +800,48 @@ function wireStaffList(){
   document.querySelectorAll('.order-item').forEach(el => {
     el.onclick = () => openOrder(el.getAttribute('data-id'));
   });
+}
+
+function exportStockReport(date, orders){
+  if(!date || !orders || orders.length===0){ toast('ไม่มีออเดอร์ของวันนี้ให้สรุป'); return; }
+
+  // sum up what was ACTUALLY scanned/packed per product code — this is what physically
+  // left the warehouse today, so it's the correct number to deduct from stock (not the
+  // ordered qty, which may be higher if an order was only partially packed)
+  const totals = {}; // code -> {name, qtyPacked, orderCount}
+  orders.forEach(o => {
+    o.items.forEach(it => {
+      if(!it.qtyScanned) return;
+      if(!totals[it.code]) totals[it.code] = { name: it.name || it.code, qtyPacked: 0, orderCount: 0 };
+      totals[it.code].qtyPacked += it.qtyScanned;
+      totals[it.code].orderCount += 1;
+    });
+  });
+
+  const codes = Object.keys(totals).sort((a,b) => a.localeCompare(b));
+  if(codes.length===0){ toast('ยังไม่มีสินค้าที่สแกนแพ็คเลยในวันนี้'); return; }
+
+  const doneCount = orders.filter(o => orderStatus(o)==='done').length;
+  const notDoneCount = orders.length - doneCount;
+
+  const wsData = [
+    ['รหัสสินค้า (SKU)', 'ชื่อสินค้า', 'จำนวนที่แพ็คไป (ชิ้น)', 'จำนวนออเดอร์ที่มีสินค้านี้'],
+    ...codes.map(c => [c, totals[c].name, totals[c].qtyPacked, totals[c].orderCount]),
+    [],
+    ['รวมออเดอร์ทั้งหมดของวันนี้', orders.length],
+    ['ออเดอร์ที่แพ็คครบแล้ว', doneCount]
+  ];
+  if(notDoneCount>0) wsData.push(['ออเดอร์ที่ยังแพ็คไม่ครบ (ตัวเลขด้านบนนับเฉพาะชิ้นที่สแกนจริงเท่านั้น)', notDoneCount]);
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{wch:16},{wch:50},{wch:20},{wch:24}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'สรุปสต็อก');
+  XLSX.writeFile(wb, 'สรุปสต็อกที่แพ็ค_'+date+'.xlsx');
+
+  toast(notDoneCount>0
+    ? 'Export แล้ว (ยังมี '+notDoneCount+' ออเดอร์แพ็คไม่ครบ — นับเฉพาะที่สแกนจริง)'
+    : 'Export สรุปสต็อกสำเร็จ');
 }
 function main_loading(){ document.getElementById('main').innerHTML = '<div class="empty">กำลังโหลด...</div>'; }
 
