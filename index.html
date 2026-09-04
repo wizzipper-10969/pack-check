@@ -1395,6 +1395,11 @@ function renderAdmin(){
     <h2 class="section">จับคู่คอลัมน์ข้อมูล</h2>
     <div class="card">
       <div class="muted" style="font-size:12px;margin-bottom:10px">วันที่: ${fmtDateTH(date)} · พบ ${rows.length} แถว, ${headers.length} คอลัมน์</div>
+      <label>ถ้าออเดอร์ซ้ำกับที่มีอยู่ในวันนั้น</label>
+      <select id="map-merge-mode">
+        <option value="merge" ${mergeMode==='merge'?'selected':''}>อัปเดตทับเฉพาะออเดอร์ที่ซ้ำ</option>
+        <option value="replace" ${mergeMode==='replace'?'selected':''}>ลบของเดิมทั้งวันแล้วนำเข้าใหม่ (แทนที่)</option>
+      </select>
       <label>ข้ามแถวแรก (ถ้าไฟล์มีแถวหัวข้ออธิบายซ้อนอยู่ใต้ชื่อคอลัมน์)</label>
       <input type="number" id="map-skip" min="0" max="5" value="${skipRows||0}">
       <div class="muted" style="font-size:12px;margin:-6px 0 12px">ถ้าตัวอย่างข้อมูลแถวแรกด้านล่างเป็นคำอธิบายคอลัมน์ (เช่น "Platform unique order ID") ไม่ใช่ข้อมูลจริง ให้ใส่ 1</div>
@@ -1467,6 +1472,13 @@ function wireAdmin(){
       State.uploadParsed.skipRows = v;
       document.getElementById('main').innerHTML = renderAdmin();
       wireAdmin();
+    };
+  }
+
+  const mergeModeSelect = document.getElementById('map-merge-mode');
+  if(mergeModeSelect){
+    mergeModeSelect.onchange = () => {
+      State.uploadParsed.mergeMode = mergeModeSelect.value;
     };
   }
 
