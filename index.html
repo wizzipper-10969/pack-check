@@ -106,6 +106,15 @@
   .modal-desc{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:14px;}
   .modal-card input[type=text]{font-size:16px;}
   .modal-card .row > *{width:auto;}
+  .modal-card.wide{max-width:480px;}
+  .eo-list{max-height:50vh;overflow-y:auto;margin-bottom:10px;padding-right:2px;}
+  .eo-row{display:flex;gap:6px;align-items:center;margin-bottom:8px;}
+  .eo-row input[type=text]{font-size:14px;padding:9px 10px;margin-bottom:0;}
+  .eo-row input.eo-code{flex:0 0 30%;min-width:0;}
+  .eo-row input.eo-name{flex:1 1 auto;min-width:0;}
+  .eo-row input.eo-qty{flex:0 0 52px;min-width:0;text-align:center;padding:9px 4px;}
+  .eo-row .eo-remove{flex:0 0 auto;background:none;border:1px solid var(--border);border-radius:10px;width:36px;height:36px;min-height:36px;font-size:15px;color:var(--danger,#c0392b);cursor:pointer;}
+  .eo-add-row{background:none;border:1.5px dashed var(--border);border-radius:14px;color:var(--accent);font-family:var(--disp);font-weight:600;font-size:13px;text-transform:uppercase;padding:10px;width:100%;cursor:pointer;margin-bottom:14px;}
 
   nav.tabs{
     display:flex;gap:0;background:var(--surface);
@@ -314,6 +323,18 @@
       </div>
     </div>
   </div>
+  <div id="edit-order-modal" class="modal-overlay">
+    <div class="modal-card wide">
+      <div class="modal-title">✏️ แก้ไขออเดอร์</div>
+      <div class="modal-desc">ใช้ตอนลูกค้าเปลี่ยนใจขอเปลี่ยนของในเซท — แก้รหัส/ชื่อ/จำนวน เพิ่มหรือลบรายการได้เลย แล้วกดบันทึก</div>
+      <div class="eo-list" id="eo-list"></div>
+      <button class="eo-add-row" id="eo-add-row">+ เพิ่มรายการสินค้า</button>
+      <div class="row">
+        <button class="btn secondary" id="eo-cancel">ยกเลิก</button>
+        <button class="btn" id="eo-save">บันทึกการแก้ไข</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -479,6 +500,16 @@ function saveStaffName(){
 document.getElementById('staff-badge').onclick = openStaffModal;
 document.getElementById('staff-modal-save').onclick = saveStaffName;
 document.getElementById('staff-modal-skip').onclick = closeStaffModal;
+document.getElementById('eo-add-row').onclick = () => {
+  if(!State.editOrderDraft) return;
+  State.editOrderDraft.push({ code: '', name: '', qtyRequired: 1, qtyScanned: 0 });
+  renderEditOrderList();
+  const rows = document.querySelectorAll('#eo-list .eo-code');
+  const last = rows[rows.length-1];
+  if(last) last.focus();
+};
+document.getElementById('eo-cancel').onclick = closeEditOrderModal;
+document.getElementById('eo-save').onclick = saveEditOrder;
 document.getElementById('staff-name-input').onkeydown = (e) => { if(e.key==='Enter'){ e.preventDefault(); saveStaffName(); } };
 let toastTimer;
 function toast(msg){
@@ -568,7 +599,9 @@ const State = {
   setList: [], // [{code,name,components:[{code,name,qty}]}]
   setForm: null, // working draft {code,name,components:[{code,name,qty}]} or null when not editing
   staffName: '', // current packer's name, persisted in localStorage
-  lastScan: null // {orderId, code, ts} — most recent scan action, for one-step undo
+  lastScan: null, // {orderId, code, ts} — most recent scan action, for one-step undo
+  editOrderDraft: null // working copy of items while the "แก้ไขออเดอร์" modal is open
+
 };
 
 /* ============ DATA LAYER ============ */
@@ -1174,11 +1207,16 @@ function renderDetail(){
   return `
     <button class="back" id="back-btn">‹ กลับไปรายการออเดอร์</button>
     <div class="detail-header">
-      <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
-      <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
-      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
-      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
-      ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+      <div class="row" style="align-items:flex-start;justify-content:space-between;gap:10px">
+        <div>
+          <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+          <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
+          ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
+          ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+          ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+        </div>
+        <button class="btn secondary" id="edit-order-btn" style="flex:0 0 auto;white-space:nowrap">✏️ แก้ไขออเดอร์</button>
+      </div>
     </div>
     ${doneBanner}
 
@@ -1223,6 +1261,9 @@ function wireDetail(){
 
   const undoBtn = document.getElementById('undo-scan-btn');
   if(undoBtn) undoBtn.onclick = undoLastScan;
+
+  const editBtn = document.getElementById('edit-order-btn');
+  if(editBtn) editBtn.onclick = openEditOrderModal;
 
   const input = document.getElementById('scan-input');
   input.focus();
@@ -1317,6 +1358,76 @@ async function undoLastScan(){
   State.lastScan = null;
   render();
   setTimeout(() => { const inp = document.getElementById('scan-input'); if(inp) inp.focus(); }, 50);
+}
+
+/* ============ STAFF: EDIT ORDER ITEMS (customer swaps a product in the set) ============ */
+function openEditOrderModal(){
+  const o = State.currentOrder;
+  if(!o) return;
+  // deep-copy so cancel doesn't touch the live order
+  State.editOrderDraft = o.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned }));
+  renderEditOrderList();
+  document.getElementById('edit-order-modal').classList.add('show');
+}
+
+function closeEditOrderModal(){
+  document.getElementById('edit-order-modal').classList.remove('show');
+  State.editOrderDraft = null;
+}
+
+function renderEditOrderList(){
+  const rows = (State.editOrderDraft||[]).map((it, idx) => `
+    <div class="eo-row" data-eo-idx="${idx}">
+      <input type="text" class="eo-code mono" placeholder="รหัส" value="${esc(it.code)}" data-eo-field="code" data-eo-idx="${idx}" autocapitalize="off">
+      <input type="text" class="eo-name" placeholder="ชื่อสินค้า" value="${esc(it.name)}" data-eo-field="name" data-eo-idx="${idx}">
+      <input type="number" class="eo-qty" placeholder="จำนวน" min="1" value="${it.qtyRequired}" data-eo-field="qtyRequired" data-eo-idx="${idx}">
+      <button class="eo-remove" data-eo-remove="${idx}" title="ลบรายการนี้">🗑</button>
+    </div>`).join('');
+  document.getElementById('eo-list').innerHTML = rows || '<div class="muted" style="font-size:13px;padding:8px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการสินค้า" ด้านล่าง</div>';
+  wireEditOrderRows();
+}
+
+function wireEditOrderRows(){
+  document.querySelectorAll('#eo-list [data-eo-field]').forEach(inp => {
+    inp.oninput = () => {
+      const idx = parseInt(inp.getAttribute('data-eo-idx'));
+      const field = inp.getAttribute('data-eo-field');
+      if(!State.editOrderDraft[idx]) return;
+      State.editOrderDraft[idx][field] = field==='qtyRequired' ? (parseInt(inp.value)||0) : inp.value;
+    };
+  });
+  document.querySelectorAll('#eo-list [data-eo-remove]').forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.getAttribute('data-eo-remove'));
+      State.editOrderDraft.splice(idx, 1);
+      renderEditOrderList();
+    };
+  });
+}
+
+async function saveEditOrder(){
+  const draft = State.editOrderDraft || [];
+  const cleaned = draft.map(it => ({ code: (it.code||'').trim(), name: (it.name||'').trim(), qtyRequired: Math.max(1, parseInt(it.qtyRequired)||1) }))
+                        .filter(it => it.code); // drop blank rows
+  if(cleaned.length === 0){ toast('ต้องมีอย่างน้อย 1 รายการสินค้าในออเดอร์'); return; }
+  const codes = cleaned.map(it => it.code.toLowerCase());
+  const dupes = codes.filter((c, i) => codes.indexOf(c) !== i);
+  if(dupes.length){ toast('มีรหัสสินค้าซ้ำ: '+[...new Set(dupes)].join(', ')); return; }
+  if(cleaned.some(it => !it.name)){ toast('กรุณาใส่ชื่อสินค้าให้ครบทุกรายการ'); return; }
+
+  const o = State.currentOrder;
+  const prevByCode = {};
+  o.items.forEach(it => { prevByCode[it.code.toLowerCase()] = it; });
+  o.items = cleaned.map(it => {
+    const prev = prevByCode[it.code.toLowerCase()];
+    // keep progress already scanned for a code that still exists, but never let it exceed the (possibly new) qty required
+    const qtyScanned = prev ? Math.min(prev.qtyScanned||0, it.qtyRequired) : 0;
+    return { code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned };
+  });
+  await saveOrder(State.date, o);
+  closeEditOrderModal();
+  toast('บันทึกการแก้ไขออเดอร์แล้ว');
+  await openOrder(o.orderId);
 }
 
 async function handleOrderLookupScan(raw){
