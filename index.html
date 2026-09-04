@@ -510,6 +510,33 @@ function beep(type){
   }catch(e){}
 }
 
+function speakPackDone(){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    const say = () => {
+      const u = new SpeechSynthesisUtterance('แพคครบแล้ว');
+      u.lang = 'th-TH';
+      u.pitch = 1.7;   // สูงขึ้น ให้ฟังดูเป็นเสียงเด็กผู้หญิง
+      u.rate = 1.05;
+      u.volume = 1;
+      const voices = speechSynthesis.getVoices();
+      const thVoice =
+        voices.find(v => /^th/i.test(v.lang) && /female|หญิง/i.test(v.name)) ||
+        voices.find(v => /^th/i.test(v.lang)) ||
+        null;
+      if(thVoice) u.voice = thVoice;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    };
+    if(speechSynthesis.getVoices().length === 0){
+      // เสียงบางทียังโหลดไม่เสร็จตอนเปิดหน้าเว็บครั้งแรก
+      speechSynthesis.onvoiceschanged = say;
+    } else {
+      say();
+    }
+  }catch(e){}
+}
+
 function showFeedback(kind, text){
   const f = document.getElementById('feedback');
   f.className = 'feedback show ' + kind;
@@ -1250,6 +1277,7 @@ async function handleScan(code){
 
   if(allDone){
     showFeedback('success', '✅ แพ็คออเดอร์ '+o.orderId+' ครบแล้ว! ไปสแกนใบปะหน้าถัดไปได้เลย');
+    speakPackDone();
     render();
     // brief pause so staff sees the "done" state, then loop back to the label-scan screen automatically
     setTimeout(async () => {
