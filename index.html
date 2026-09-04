@@ -1207,16 +1207,12 @@ function renderDetail(){
   return `
     <button class="back" id="back-btn">‹ กลับไปรายการออเดอร์</button>
     <div class="detail-header">
-      <div class="row" style="align-items:flex-start;justify-content:space-between;gap:10px">
-        <div>
-          <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
-          <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
-          ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
-          ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
-          ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
-        </div>
-        <button class="btn secondary" id="edit-order-btn" style="flex:0 0 auto;white-space:nowrap">✏️ แก้ไขออเดอร์</button>
-      </div>
+      <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+      <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
+      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
+      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+      ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+      <button class="btn secondary" id="edit-order-btn" style="margin-top:10px">✏️ แก้ไขออเดอร์</button>
     </div>
     ${doneBanner}
 
