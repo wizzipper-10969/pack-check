@@ -1326,18 +1326,35 @@ async function startCamera(onDecode){
 
   wrap.classList.add('active');
   State.camActive = true;
-  State.html5Qr = new Html5Qrcode('reader');
+  State.html5Qr = new Html5Qrcode('reader', {
+    // iOS Safari's default decode pass tries every supported format at once, which is
+    // slower and less reliable than on Android — narrowing this to just the two formats
+    // we actually print/generate (CODE128 for products, QR for shipping labels) makes
+    // each decode attempt faster and less ambiguous on iOS in particular
+    formatsToSupport: (typeof Html5QrcodeSupportedFormats !== 'undefined')
+      ? [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128]
+      : undefined,
+    verbose: false
+  });
   try{
     await State.html5Qr.start(
-      { facingMode: 'environment' },
+      {
+        facingMode: 'environment',
+        // iOS Safari tends to hand getUserMedia a much lower-res stream than Android
+        // by default, which especially hurts thin 1D barcodes — ask for a bigger frame
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
       {
         fps: 12,
         qrbox: (viewfinderW, viewfinderH) => {
-          // square box sized to the smaller viewfinder dimension — big enough to
-          // frame a QR code fully, and still wide enough to catch a 1D barcode
-          const edge = Math.min(viewfinderW, viewfinderH);
-          const size = Math.floor(edge * 0.75);
-          return { width: size, height: size };
+          // a wide rectangle rather than a tight square — 1D barcodes are much wider
+          // than they are tall, and a square box sized to the smaller edge (as before)
+          // can crop the ends of the barcode on iOS's viewfinder aspect ratio. Still
+          // tall enough that a QR code held inside it scans fine too.
+          const w = Math.floor(Math.min(viewfinderW * 0.88, viewfinderH * 1.5));
+          const h = Math.floor(Math.min(viewfinderH * 0.55, viewfinderW * 0.62));
+          return { width: w, height: h };
         }
       },
       (decodedText) => {
