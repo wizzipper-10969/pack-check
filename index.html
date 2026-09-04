@@ -1572,7 +1572,13 @@ function wireAdmin(){
       if(isNaN(qty) || qty<=0) qty = 1;
 
       const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
-      if(setDef && setDef.components && setDef.components.length){
+      // a set definition whose ONLY component points back at its own code is not a real
+      // bundle — it's the auto-generated "self-referencing" stub created purely so a
+      // standalone product's name/photo can be looked up (see importSetsFromFile). Treating
+      // it as a real bundle here would silently swallow the row into a duplicate of itself.
+      const isRealBundle = setDef && setDef.components && setDef.components.length &&
+        !(setDef.components.length === 1 && setDef.components[0].code === code);
+      if(isRealBundle){
         expandedSets++;
         setDef.components.forEach(comp => {
           const compQty = (comp.qty||1) * qty;
@@ -1590,6 +1596,17 @@ function wireAdmin(){
     const orderIds = Object.keys(grouped);
     if(orderIds.length===0){ toast('ไม่พบออเดอร์ที่ถูกต้อง ตรวจสอบการจับคู่คอลัมน์ หรือค่า "ข้ามแถวแรก"'); btn.disabled=false; btn.textContent='นำเข้าข้อมูล'; return; }
 
+    // fetch whatever's already saved for these order IDs BEFORE any deletion/overwrite,
+    // so re-importing a file (e.g. to fix a data issue) never wipes out packing progress
+    // that staff already scanned in
+    btn.textContent = 'กำลังตรวจสอบข้อมูลเดิม...';
+    const existingByOrderId = {};
+    await mapWithConcurrency(orderIds, 6, async orderId => {
+      const raw = await sGetWithRetry(orderKey(date, orderId), true);
+      if(raw){ try{ existingByOrderId[orderId] = JSON.parse(raw); }catch(e){} }
+    });
+    let restoredCount = 0;
+
     if(mergeMode==='replace'){
       const existingKeys = await sList('order:'+date+':', true);
       for(const k of existingKeys){
@@ -1601,6 +1618,20 @@ function wireAdmin(){
     let doneCount = 0;
     for(const orderId of orderIds){
       const order = grouped[orderId];
+      const prev = existingByOrderId[orderId];
+      if(prev && Array.isArray(prev.items)){
+        let anyRestored = false;
+        order.items.forEach(it => {
+          const prevItem = prev.items.find(p => p.code === it.code);
+          if(prevItem && prevItem.qtyScanned){
+            it.qtyScanned = Math.min(prevItem.qtyScanned, it.qtyRequired);
+            anyRestored = true;
+          }
+        });
+        if(prev.packedBy) order.packedBy = prev.packedBy;
+        if(Array.isArray(prev.activityLog)) order.activityLog = prev.activityLog;
+        if(anyRestored) restoredCount++;
+      }
       order.status = 'pending';
       order.updatedAt = Date.now();
       await sSetWithRetry(orderKey(date, orderId), JSON.stringify(order), true);
@@ -1611,6 +1642,7 @@ function wireAdmin(){
     await addDateToIndex(date);
 
     toast('นำเข้าสำเร็จ '+orderIds.length+' ออเดอร์'
+      + (restoredCount ? ' (คืนสถานะแพ็คเดิมให้ '+restoredCount+' ออเดอร์)' : '')
       + (expandedSets ? ' (แตกเซทให้ '+expandedSets+' รายการ)' : '')
       + (skippedInvalid ? ' (ข้าม '+skippedInvalid+' แถวที่ข้อมูลไม่ครบ)' : ''));
     State.uploadParsed = null;
