@@ -866,6 +866,7 @@ function renderStaffList(){
           <div class="oid">${esc(o.orderId)}</div>
           <div class="cust">${esc(o.customer||'-')}</div>
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
+          ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:11px;margin-top:1px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์</div>` : ''}
         </div>
         <div style="text-align:right">
           <div class="progtext">${prog.scanned}/${prog.total} ชิ้น</div>
@@ -1149,6 +1150,7 @@ function renderDetail(){
       <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
+      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
     </div>
     ${doneBanner}
@@ -1292,7 +1294,7 @@ async function undoLastScan(){
 async function handleOrderLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
-  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code));
+  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
   if(!match){
     // fallback: loose contains-match, in case the scanned QR/barcode has extra characters around the number
     match = State.orders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
@@ -1605,6 +1607,60 @@ function wireAdmin(){
       const raw = await sGetWithRetry(orderKey(date, orderId), true);
       if(raw){ try{ existingByOrderId[orderId] = JSON.parse(raw); }catch(e){} }
     });
+
+    // TikTok sometimes combines several Order IDs into ONE physical shipment/tracking
+    // number (same package, different orders) — if we kept them as separate order
+    // documents, scanning the shipping label would only ever open one of them and the
+    // items belonging to the other order(s) would silently never show up to be packed.
+    // Merge any orders that share a tracking number into a single combined order here,
+    // carrying forward each original order's already-scanned progress if any.
+    const byTracking = {};
+    Object.values(grouped).forEach(o => {
+      if(!o.tracking) return;
+      const key = o.tracking;
+      if(!byTracking[key]) byTracking[key] = [];
+      byTracking[key].push(o);
+    });
+    let mergedGroupCount = 0;
+    Object.values(byTracking).forEach(group => {
+      if(group.length < 2) return;
+      mergedGroupCount++;
+      const originalOrderIds = group.map(o => o.orderId).sort();
+      const mergedOrderId = originalOrderIds.join(' + ');
+      const mergedItems = [];
+      group.forEach(o => {
+        o.items.forEach(it => {
+          const existing = mergedItems.find(m => m.code === it.code);
+          if(existing){ existing.qtyRequired += it.qtyRequired; }
+          else { mergedItems.push({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: 0 }); }
+        });
+      });
+      const mergedPrev = { items: [], packedBy: null, activityLog: [] };
+      group.forEach(o => {
+        const prev = existingByOrderId[o.orderId];
+        if(prev && Array.isArray(prev.items)){
+          prev.items.forEach(pi => {
+            const ex = mergedPrev.items.find(m => m.code === pi.code);
+            if(ex){ ex.qtyScanned += (pi.qtyScanned||0); }
+            else { mergedPrev.items.push({ code: pi.code, qtyScanned: pi.qtyScanned||0 }); }
+          });
+          if(prev.packedBy) mergedPrev.packedBy = prev.packedBy;
+          if(Array.isArray(prev.activityLog)) mergedPrev.activityLog = mergedPrev.activityLog.concat(prev.activityLog);
+        }
+        delete grouped[o.orderId];
+        delete existingByOrderId[o.orderId];
+      });
+      if(mergedPrev.activityLog.length > 300) mergedPrev.activityLog = mergedPrev.activityLog.slice(-300);
+      grouped[mergedOrderId] = {
+        orderId: mergedOrderId,
+        customer: group.map(o => o.customer).find(Boolean) || '',
+        tracking: group[0].tracking,
+        originalOrderIds,
+        items: mergedItems
+      };
+      existingByOrderId[mergedOrderId] = mergedPrev;
+    });
+    const finalOrderIds = Object.keys(grouped);
     let restoredCount = 0;
 
     if(mergeMode==='replace'){
@@ -1613,10 +1669,21 @@ function wireAdmin(){
         await sDelete(k);
         await sleep(120);
       }
+    } else if(mergedGroupCount){
+      // even outside "replace" mode, explicitly remove any stale individual order docs
+      // that a merge just superseded — otherwise both the old separate entries and the
+      // new combined one would show up side by side in the order list
+      for(const group of Object.values(byTracking)){
+        if(group.length < 2) continue;
+        for(const o of group){
+          await sDelete(orderKey(date, o.orderId));
+          await sleep(80);
+        }
+      }
     }
 
     let doneCount = 0;
-    for(const orderId of orderIds){
+    for(const orderId of finalOrderIds){
       const order = grouped[orderId];
       const prev = existingByOrderId[orderId];
       if(prev && Array.isArray(prev.items)){
@@ -1636,12 +1703,13 @@ function wireAdmin(){
       order.updatedAt = Date.now();
       await sSetWithRetry(orderKey(date, orderId), JSON.stringify(order), true);
       doneCount++;
-      btn.textContent = 'กำลังนำเข้า... ('+doneCount+'/'+orderIds.length+')';
+      btn.textContent = 'กำลังนำเข้า... ('+doneCount+'/'+finalOrderIds.length+')';
       await sleep(150);
     }
     await addDateToIndex(date);
 
-    toast('นำเข้าสำเร็จ '+orderIds.length+' ออเดอร์'
+    toast('นำเข้าสำเร็จ '+finalOrderIds.length+' ออเดอร์'
+      + (mergedGroupCount ? ' (รวมออเดอร์ที่ใช้เลขพัสดุเดียวกันให้ '+mergedGroupCount+' พัสดุ)' : '')
       + (restoredCount ? ' (คืนสถานะแพ็คเดิมให้ '+restoredCount+' ออเดอร์)' : '')
       + (expandedSets ? ' (แตกเซทให้ '+expandedSets+' รายการ)' : '')
       + (skippedInvalid ? ' (ข้าม '+skippedInvalid+' แถวที่ข้อมูลไม่ครบ)' : ''));
