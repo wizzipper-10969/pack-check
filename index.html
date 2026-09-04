@@ -1874,22 +1874,14 @@ function wireAdmin(){
     const orderIds = Object.keys(grouped);
     if(orderIds.length===0){ toast('ไม่พบออเดอร์ที่ถูกต้อง ตรวจสอบการจับคู่คอลัมน์ หรือค่า "ข้ามแถวแรก"'); btn.disabled=false; btn.textContent='นำเข้าข้อมูล'; return; }
 
-    // fetch whatever's already saved for these order IDs BEFORE any deletion/overwrite,
-    // so re-importing a file (e.g. to fix a data issue) never wipes out packing progress
-    // that staff already scanned in
-    btn.textContent = 'กำลังตรวจสอบข้อมูลเดิม...';
-    const existingByOrderId = {};
-    await mapWithConcurrency(orderIds, 6, async orderId => {
-      const raw = await sGetWithRetry(orderKey(date, orderId), true);
-      if(raw){ try{ existingByOrderId[orderId] = JSON.parse(raw); }catch(e){} }
-    });
-
     // TikTok sometimes combines several Order IDs into ONE physical shipment/tracking
     // number (same package, different orders) — if we kept them as separate order
     // documents, scanning the shipping label would only ever open one of them and the
     // items belonging to the other order(s) would silently never show up to be packed.
-    // Merge any orders that share a tracking number into a single combined order here,
-    // carrying forward each original order's already-scanned progress if any.
+    // Work out these merge groups BEFORE fetching existing data, so we know to also look
+    // for a previously-saved COMBINED doc (not just the original individual order IDs —
+    // those get deleted once merged once, so looking them up again on a later re-import
+    // would otherwise always come up empty and silently reset packing progress to zero).
     const byTracking = {};
     Object.values(grouped).forEach(o => {
       if(!o.tracking) return;
@@ -1897,6 +1889,20 @@ function wireAdmin(){
       if(!byTracking[key]) byTracking[key] = [];
       byTracking[key].push(o);
     });
+    const prospectiveMergedIds = Object.values(byTracking)
+      .filter(group => group.length >= 2)
+      .map(group => group.map(o => o.orderId).sort().join(' + '));
+
+    // fetch whatever's already saved for these order IDs (both individual and any
+    // previously-merged combined doc) BEFORE any deletion/overwrite, so re-importing a
+    // file (e.g. to fix a data issue) never wipes out packing progress already scanned in
+    btn.textContent = 'กำลังตรวจสอบข้อมูลเดิม...';
+    const existingByOrderId = {};
+    await mapWithConcurrency([...orderIds, ...prospectiveMergedIds], 6, async orderId => {
+      const raw = await sGetWithRetry(orderKey(date, orderId), true);
+      if(raw){ try{ existingByOrderId[orderId] = JSON.parse(raw); }catch(e){} }
+    });
+
     let mergedGroupCount = 0;
     Object.values(byTracking).forEach(group => {
       if(group.length < 2) return;
@@ -1911,22 +1917,32 @@ function wireAdmin(){
           else { mergedItems.push({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: 0 }); }
         });
       });
-      const mergedPrev = { items: [], packedBy: null, activityLog: [] };
-      group.forEach(o => {
-        const prev = existingByOrderId[o.orderId];
-        if(prev && Array.isArray(prev.items)){
-          prev.items.forEach(pi => {
-            const ex = mergedPrev.items.find(m => m.code === pi.code);
-            if(ex){ ex.qtyScanned += (pi.qtyScanned||0); }
-            else { mergedPrev.items.push({ code: pi.code, qtyScanned: pi.qtyScanned||0 }); }
-          });
-          if(prev.packedBy) mergedPrev.packedBy = prev.packedBy;
-          if(Array.isArray(prev.activityLog)) mergedPrev.activityLog = mergedPrev.activityLog.concat(prev.activityLog);
-        }
-        delete grouped[o.orderId];
-        delete existingByOrderId[o.orderId];
-      });
-      if(mergedPrev.activityLog.length > 300) mergedPrev.activityLog = mergedPrev.activityLog.slice(-300);
+
+      // prefer a previously-saved COMBINED doc for this exact same group (most common
+      // case on any re-import after the first merge) — only fall back to summing each
+      // original order's progress individually the first time this group gets merged
+      const existingCombo = existingByOrderId[mergedOrderId];
+      let mergedPrev;
+      if(existingCombo && Array.isArray(existingCombo.items)){
+        mergedPrev = existingCombo;
+      } else {
+        mergedPrev = { items: [], packedBy: null, activityLog: [] };
+        group.forEach(o => {
+          const prev = existingByOrderId[o.orderId];
+          if(prev && Array.isArray(prev.items)){
+            prev.items.forEach(pi => {
+              const ex = mergedPrev.items.find(m => m.code === pi.code);
+              if(ex){ ex.qtyScanned += (pi.qtyScanned||0); }
+              else { mergedPrev.items.push({ code: pi.code, qtyScanned: pi.qtyScanned||0 }); }
+            });
+            if(prev.packedBy) mergedPrev.packedBy = prev.packedBy;
+            if(Array.isArray(prev.activityLog)) mergedPrev.activityLog = mergedPrev.activityLog.concat(prev.activityLog);
+          }
+        });
+        if(mergedPrev.activityLog.length > 300) mergedPrev.activityLog = mergedPrev.activityLog.slice(-300);
+      }
+      group.forEach(o => { delete grouped[o.orderId]; delete existingByOrderId[o.orderId]; });
+
       grouped[mergedOrderId] = {
         orderId: mergedOrderId,
         customer: group.map(o => o.customer).find(Boolean) || '',
