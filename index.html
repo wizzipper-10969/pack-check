@@ -108,13 +108,24 @@
   .modal-card .row > *{width:auto;}
   .modal-card.wide{max-width:480px;}
   .eo-list{max-height:50vh;overflow-y:auto;margin-bottom:10px;padding-right:2px;}
-  .eo-row{display:flex;gap:6px;align-items:center;margin-bottom:8px;}
-  .eo-row input[type=text]{font-size:14px;padding:9px 10px;margin-bottom:0;}
-  .eo-row input.eo-code{flex:0 0 30%;min-width:0;}
-  .eo-row input.eo-name{flex:1 1 auto;min-width:0;}
-  .eo-row input.eo-qty{flex:0 0 52px;min-width:0;text-align:center;padding:9px 4px;}
+  .eo-row{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px;}
+  .eo-row .thumb{width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);}
+  .eo-row .thumb-placeholder{width:40px;height:40px;border-radius:6px;flex-shrink:0;background:var(--surface2);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted);}
+  .eo-row .eo-info{flex:1;min-width:0;cursor:pointer;}
+  .eo-row .eo-info .eo-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .eo-row .eo-info .eo-code{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .eo-row .eo-info.eo-empty .eo-name{color:var(--accent);}
+  .eo-row input.eo-qty{flex:0 0 48px;min-width:0;text-align:center;padding:9px 4px;margin-bottom:0;font-size:14px;}
   .eo-row .eo-remove{flex:0 0 auto;background:none;border:1px solid var(--border);border-radius:10px;width:36px;height:36px;min-height:36px;font-size:15px;color:var(--danger,#c0392b);cursor:pointer;}
   .eo-add-row{background:none;border:1.5px dashed var(--border);border-radius:14px;color:var(--accent);font-family:var(--disp);font-weight:600;font-size:13px;text-transform:uppercase;padding:10px;width:100%;cursor:pointer;margin-bottom:14px;}
+
+  #product-picker-modal{z-index:250;}
+  #product-picker-modal .modal-card{max-width:480px;display:flex;flex-direction:column;max-height:85vh;}
+  #pp-search{margin-bottom:10px;}
+  #pp-list{overflow-y:auto;flex:1;margin-bottom:8px;}
+  .pp-empty{font-size:13px;color:var(--muted);padding:14px 4px;text-align:center;}
+  .pp-manual-link{background:none;border:none;color:var(--accent);font-size:13px;text-decoration:underline;cursor:pointer;padding:6px 2px;margin-bottom:10px;text-align:left;}
+  .pp-manual-form input[type=text]{font-size:14px;}
 
   nav.tabs{
     display:flex;gap:0;background:var(--surface);
@@ -326,12 +337,30 @@
   <div id="edit-order-modal" class="modal-overlay">
     <div class="modal-card wide">
       <div class="modal-title">✏️ แก้ไขออเดอร์</div>
-      <div class="modal-desc">ใช้ตอนลูกค้าเปลี่ยนใจขอเปลี่ยนของในเซท — แก้รหัส/ชื่อ/จำนวน เพิ่มหรือลบรายการได้เลย แล้วกดบันทึก</div>
+      <div class="modal-desc">ใช้ตอนลูกค้าเปลี่ยนใจขอเปลี่ยนของในเซท — แตะรายการเพื่อเปลี่ยนสินค้า ปรับจำนวน หรือเพิ่ม/ลบรายการ แล้วกดบันทึก</div>
       <div class="eo-list" id="eo-list"></div>
       <button class="eo-add-row" id="eo-add-row">+ เพิ่มรายการสินค้า</button>
       <div class="row">
         <button class="btn secondary" id="eo-cancel">ยกเลิก</button>
         <button class="btn" id="eo-save">บันทึกการแก้ไข</button>
+      </div>
+    </div>
+  </div>
+  <div id="product-picker-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">🔍 เลือกสินค้า</div>
+      <input type="text" id="pp-search" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." autocomplete="off">
+      <div id="pp-list"></div>
+      <button class="pp-manual-link" id="pp-manual-toggle">หาไม่เจอ? + เพิ่มสินค้าใหม่ด้วยตนเอง</button>
+      <div id="pp-manual-form" class="pp-manual-form" style="display:none">
+        <input type="text" id="pp-manual-code" placeholder="รหัส SKU" autocapitalize="off">
+        <input type="text" id="pp-manual-name" placeholder="ชื่อสินค้า">
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" id="pp-manual-confirm">ใช้สินค้านี้</button>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn secondary" id="pp-cancel">ยกเลิก</button>
       </div>
     </div>
   </div>
@@ -502,14 +531,23 @@ document.getElementById('staff-modal-save').onclick = saveStaffName;
 document.getElementById('staff-modal-skip').onclick = closeStaffModal;
 document.getElementById('eo-add-row').onclick = () => {
   if(!State.editOrderDraft) return;
-  State.editOrderDraft.push({ code: '', name: '', qtyRequired: 1, qtyScanned: 0 });
-  renderEditOrderList();
-  const rows = document.querySelectorAll('#eo-list .eo-code');
-  const last = rows[rows.length-1];
-  if(last) last.focus();
+  openProductPicker('new');
 };
 document.getElementById('eo-cancel').onclick = closeEditOrderModal;
 document.getElementById('eo-save').onclick = saveEditOrder;
+document.getElementById('pp-search').oninput = (e) => renderProductPickerList(e.target.value);
+document.getElementById('pp-cancel').onclick = closeProductPicker;
+document.getElementById('pp-manual-toggle').onclick = () => {
+  const form = document.getElementById('pp-manual-form');
+  form.style.display = form.style.display==='none' ? 'block' : 'none';
+  if(form.style.display==='block') document.getElementById('pp-manual-code').focus();
+};
+document.getElementById('pp-manual-confirm').onclick = () => {
+  const code = document.getElementById('pp-manual-code').value.trim();
+  const name = document.getElementById('pp-manual-name').value.trim();
+  if(!code){ toast('กรุณาใส่รหัส SKU ของสินค้าใหม่'); return; }
+  selectProduct(code, name || code);
+};
 document.getElementById('staff-name-input').onkeydown = (e) => { if(e.key==='Enter'){ e.preventDefault(); saveStaffName(); } };
 let toastTimer;
 function toast(msg){
@@ -600,7 +638,9 @@ const State = {
   setForm: null, // working draft {code,name,components:[{code,name,qty}]} or null when not editing
   staffName: '', // current packer's name, persisted in localStorage
   lastScan: null, // {orderId, code, ts} — most recent scan action, for one-step undo
-  editOrderDraft: null // working copy of items while the "แก้ไขออเดอร์" modal is open
+  editOrderDraft: null, // working copy of items while the "แก้ไขออเดอร์" modal is open
+  productPickerTarget: null // number (index into editOrderDraft) or 'new' — which row the product picker is filling
+
 
 };
 
@@ -1357,13 +1397,17 @@ async function undoLastScan(){
 }
 
 /* ============ STAFF: EDIT ORDER ITEMS (customer swaps a product in the set) ============ */
-function openEditOrderModal(){
+async function openEditOrderModal(){
   const o = State.currentOrder;
   if(!o) return;
   // deep-copy so cancel doesn't touch the live order
   State.editOrderDraft = o.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned }));
   renderEditOrderList();
   document.getElementById('edit-order-modal').classList.add('show');
+  // refresh the product catalog in the background so the picker has the latest list
+  refreshPrintCodes().then(() => {
+    if(document.getElementById('edit-order-modal').classList.contains('show')) renderEditOrderList();
+  }).catch(()=>{});
 }
 
 function closeEditOrderModal(){
@@ -1372,24 +1416,33 @@ function closeEditOrderModal(){
 }
 
 function renderEditOrderList(){
-  const rows = (State.editOrderDraft||[]).map((it, idx) => `
-    <div class="eo-row" data-eo-idx="${idx}">
-      <input type="text" class="eo-code mono" placeholder="รหัส" value="${esc(it.code)}" data-eo-field="code" data-eo-idx="${idx}" autocapitalize="off">
-      <input type="text" class="eo-name" placeholder="ชื่อสินค้า" value="${esc(it.name)}" data-eo-field="name" data-eo-idx="${idx}">
-      <input type="number" class="eo-qty" placeholder="จำนวน" min="1" value="${it.qtyRequired}" data-eo-field="qtyRequired" data-eo-idx="${idx}">
+  const rows = (State.editOrderDraft||[]).map((it, idx) => {
+    const hasProduct = !!it.code;
+    const photo = it.code ? State.photoCache[it.code] : null;
+    const thumbHtml = photo ? `<img class="thumb" src="${photo}">` : `<div class="thumb-placeholder">🏷️</div>`;
+    const infoHtml = hasProduct
+      ? `<div class="eo-info" data-eo-pick="${idx}"><div class="eo-name">${esc(it.name||it.code)}</div><div class="eo-code">${esc(it.code)}</div></div>`
+      : `<div class="eo-info eo-empty" data-eo-pick="${idx}"><div class="eo-name">แตะเพื่อเลือกสินค้า...</div></div>`;
+    return `<div class="eo-row" data-eo-idx="${idx}">
+      ${thumbHtml}
+      ${infoHtml}
+      <input type="number" class="eo-qty" placeholder="จำนวน" min="1" value="${it.qtyRequired}" data-eo-qty="${idx}">
       <button class="eo-remove" data-eo-remove="${idx}" title="ลบรายการนี้">🗑</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   document.getElementById('eo-list').innerHTML = rows || '<div class="muted" style="font-size:13px;padding:8px 0">ยังไม่มีรายการสินค้า — กด "เพิ่มรายการสินค้า" ด้านล่าง</div>';
   wireEditOrderRows();
 }
 
 function wireEditOrderRows(){
-  document.querySelectorAll('#eo-list [data-eo-field]').forEach(inp => {
+  document.querySelectorAll('#eo-list [data-eo-pick]').forEach(el => {
+    el.onclick = () => openProductPicker(parseInt(el.getAttribute('data-eo-pick')));
+  });
+  document.querySelectorAll('#eo-list [data-eo-qty]').forEach(inp => {
     inp.oninput = () => {
-      const idx = parseInt(inp.getAttribute('data-eo-idx'));
-      const field = inp.getAttribute('data-eo-field');
+      const idx = parseInt(inp.getAttribute('data-eo-qty'));
       if(!State.editOrderDraft[idx]) return;
-      State.editOrderDraft[idx][field] = field==='qtyRequired' ? (parseInt(inp.value)||0) : inp.value;
+      State.editOrderDraft[idx].qtyRequired = parseInt(inp.value)||0;
     };
   });
   document.querySelectorAll('#eo-list [data-eo-remove]').forEach(btn => {
@@ -1403,13 +1456,13 @@ function wireEditOrderRows(){
 
 async function saveEditOrder(){
   const draft = State.editOrderDraft || [];
-  const cleaned = draft.map(it => ({ code: (it.code||'').trim(), name: (it.name||'').trim(), qtyRequired: Math.max(1, parseInt(it.qtyRequired)||1) }))
-                        .filter(it => it.code); // drop blank rows
+  const withProduct = draft.filter(it => it.code && it.code.trim());
+  if(withProduct.length !== draft.length){ toast('มีรายการที่ยังไม่ได้เลือกสินค้า กรุณาเลือกให้ครบ หรือลบแถวที่ไม่ใช้ออก'); return; }
+  const cleaned = withProduct.map(it => ({ code: it.code.trim(), name: (it.name||it.code).trim(), qtyRequired: Math.max(1, parseInt(it.qtyRequired)||1) }));
   if(cleaned.length === 0){ toast('ต้องมีอย่างน้อย 1 รายการสินค้าในออเดอร์'); return; }
   const codes = cleaned.map(it => it.code.toLowerCase());
   const dupes = codes.filter((c, i) => codes.indexOf(c) !== i);
-  if(dupes.length){ toast('มีรหัสสินค้าซ้ำ: '+[...new Set(dupes)].join(', ')); return; }
-  if(cleaned.some(it => !it.name)){ toast('กรุณาใส่ชื่อสินค้าให้ครบทุกรายการ'); return; }
+  if(dupes.length){ toast('มีสินค้าซ้ำกันในออเดอร์: '+[...new Set(dupes)].join(', ')); return; }
 
   const o = State.currentOrder;
   const prevByCode = {};
@@ -1424,6 +1477,62 @@ async function saveEditOrder(){
   closeEditOrderModal();
   toast('บันทึกการแก้ไขออเดอร์แล้ว');
   await openOrder(o.orderId);
+}
+
+/* ---- product picker (choose from the existing product catalog instead of typing SKU/name) ---- */
+function openProductPicker(targetIdx){
+  State.productPickerTarget = targetIdx; // number = replace that row in editOrderDraft, 'new' = append a row
+  const search = document.getElementById('pp-search');
+  search.value = '';
+  document.getElementById('pp-manual-form').style.display = 'none';
+  document.getElementById('pp-manual-code').value = '';
+  document.getElementById('pp-manual-name').value = '';
+  renderProductPickerList('');
+  document.getElementById('product-picker-modal').classList.add('show');
+  setTimeout(() => search.focus(), 50);
+}
+
+function closeProductPicker(){
+  document.getElementById('product-picker-modal').classList.remove('show');
+  State.productPickerTarget = null;
+}
+
+function renderProductPickerList(q){
+  const term = (q||'').trim().toLowerCase();
+  const list = (State.printCodes||[]).filter(it => !term || it.code.toLowerCase().includes(term) || (it.name||'').toLowerCase().includes(term));
+  const html = list.map(it => {
+    const photo = State.photoCache[it.code];
+    const thumbHtml = photo ? `<img class="thumb" src="${photo}">` : `<div class="thumb-placeholder">🏷️</div>`;
+    return `<div class="code-pick-row" data-pp-pick="${esc(it.code)}" style="cursor:pointer">
+      ${thumbHtml}
+      <div class="cinfo">
+        <div class="cname">${esc(it.name||it.code)}</div>
+        <div class="ccode">${esc(it.code)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('pp-list').innerHTML = html || `<div class="pp-empty">ไม่พบสินค้าที่ตรงกับคำค้นหา — ลองพิมพ์คำอื่น หรือกด "เพิ่มสินค้าใหม่ด้วยตนเอง" ด้านล่าง</div>`;
+  document.querySelectorAll('#pp-list [data-pp-pick]').forEach(row => {
+    row.onclick = () => {
+      const code = row.getAttribute('data-pp-pick');
+      const item = (State.printCodes||[]).find(c => c.code === code);
+      if(item) selectProduct(item.code, item.name);
+    };
+  });
+}
+
+function selectProduct(code, name){
+  const idx = State.productPickerTarget;
+  if(idx === 'new'){
+    State.editOrderDraft.push({ code, name: name||code, qtyRequired: 1, qtyScanned: 0 });
+  } else if(typeof idx === 'number' && State.editOrderDraft[idx]){
+    const row = State.editOrderDraft[idx];
+    if(row.code !== code) row.qtyScanned = 0; // swapped to a different product — old scan progress no longer counts
+    row.code = code;
+    row.name = name || code;
+  }
+  closeProductPicker();
+  renderEditOrderList();
 }
 
 async function handleOrderLookupScan(raw){
