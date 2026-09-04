@@ -1041,10 +1041,55 @@ function exportStockReport(date, orders){
   ];
   if(notDoneCount>0) wsData.push(['ออเดอร์ที่ยังแพ็คไม่ครบ (ตัวเลขด้านบนนับเฉพาะชิ้นที่สแกนจริงเท่านั้น)', notDoneCount]);
 
+  // --- who packed which order ---
+  const byOrderData = [
+    ['Order ID', 'ลูกค้า', 'เลขพัสดุ', 'สถานะ', 'แพ็คแล้ว/ทั้งหมด (ชิ้น)', 'แพ็คโดย']
+  ];
+  orders.forEach(o => {
+    const prog = orderProgress(o);
+    const status = orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค');
+    byOrderData.push([o.orderId, o.customer||'-', o.tracking||'-', status, prog.scanned+'/'+prog.total, o.packedBy||'-']);
+  });
+
+  // --- totals per staff member, from the scan activity log (falls back to the order's
+  // last-known packer for older orders scanned before per-scan logging existed) ---
+  const staffTotals = {}; // name -> {items, orderIds:Set}
+  const bump = (name, orderId, count) => {
+    const key = name || 'ไม่ระบุชื่อ';
+    if(!staffTotals[key]) staffTotals[key] = { items: 0, orderIds: new Set() };
+    staffTotals[key].items += count;
+    staffTotals[key].orderIds.add(orderId);
+  };
+  orders.forEach(o => {
+    const totalScanned = o.items.reduce((s,it) => s + (it.qtyScanned||0), 0);
+    if(totalScanned===0) return;
+    if(Array.isArray(o.activityLog) && o.activityLog.length){
+      o.activityLog.forEach(entry => bump(entry.staff, o.orderId, 1));
+    } else {
+      // no per-scan log on this order — attribute its whole scanned qty to whoever
+      // last touched it (best-effort estimate, noted in the sheet)
+      bump(o.packedBy, o.orderId, totalScanned);
+    }
+  });
+  const staffNames = Object.keys(staffTotals).sort((a,b) => staffTotals[b].items - staffTotals[a].items);
+  const byStaffData = [
+    ['พนักงาน', 'จำนวนชิ้นที่สแกน', 'จำนวนออเดอร์ที่เกี่ยวข้อง'],
+    ...staffNames.map(n => [n, staffTotals[n].items, staffTotals[n].orderIds.size]),
+    [],
+    ['หมายเหตุ', 'ออเดอร์ที่แพ็คก่อนมีระบบบันทึกชื่อผู้แพ็ค จะนับรวมไว้ที่ "ไม่ระบุชื่อ" หรือใช้ชื่อล่าสุดที่แตะออเดอร์นั้นเป็นตัวประมาณ']
+  ];
+
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{wch:16},{wch:50},{wch:20},{wch:24}];
+  const wsByOrder = XLSX.utils.aoa_to_sheet(byOrderData);
+  wsByOrder['!cols'] = [{wch:22},{wch:22},{wch:20},{wch:14},{wch:18},{wch:16}];
+  const wsByStaff = XLSX.utils.aoa_to_sheet(byStaffData);
+  wsByStaff['!cols'] = [{wch:18},{wch:18},{wch:22}];
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'สรุปสต็อก');
+  XLSX.utils.book_append_sheet(wb, wsByOrder, 'แพ็คโดย (แยกออเดอร์)');
+  XLSX.utils.book_append_sheet(wb, wsByStaff, 'สรุปตามพนักงาน');
   XLSX.writeFile(wb, 'สรุปสต็อกที่แพ็ค_'+date+'.xlsx');
 
   toast(notDoneCount>0
