@@ -224,6 +224,16 @@
   .feedback.danger{background:rgba(229,72,77,.88);color:#2b0505;}
   .feedback.warn{background:rgba(224,138,0,.88);color:#2b1f04;}
 
+  .verify-popup{
+    position:fixed;left:50%;bottom:100px;max-width:360px;width:88%;
+    transform:translateX(-50%) translateY(16px);opacity:0;pointer-events:none;
+    transition:opacity .2s ease-out, transform .2s ease-out;
+    background:var(--surface);border:2px solid var(--accent);border-radius:16px;
+    padding:14px 16px;box-shadow:0 10px 34px rgba(0,0,0,.28);z-index:60;cursor:pointer;
+  }
+  .verify-popup.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+  .verify-popup.warn{border-color:var(--warn);}
+
   .scan-bar{
     background:var(--surface);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1.5px solid rgba(224,138,0,.45);border-radius:20px;
     padding:14px 16px;margin-bottom:16px;box-shadow:var(--glass-shadow);
@@ -324,6 +334,7 @@
   <main id="main"></main>
   <div id="label-sheet"></div>
   <div id="feedback" class="feedback"></div>
+  <div id="verify-popup" class="verify-popup"></div>
   <div id="staff-modal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-title">👤 ชื่อพนักงานแพ็ค</div>
@@ -1718,6 +1729,34 @@ function wireVerifyList(){
   });
 }
 
+let verifyPopupTimer = null;
+function showVerifyPopup(order, kind){
+  const el = document.getElementById('verify-popup');
+  if(!el) return;
+  const itemLines = order.items.map(it =>
+    `<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:2px 0">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.name)}</span>
+      <span class="mono" style="flex-shrink:0">${it.qtyRequired}</span>
+    </div>`
+  ).join('');
+  const title = kind==='warn' ? '⚠ ซ้ำ — สแกนไปแล้ว' : '✅ สแกนแล้ว เตรียมจัดส่ง';
+  el.innerHTML = `
+    <div style="font-weight:700;font-size:15px;margin-bottom:2px">${title}</div>
+    <div class="mono" style="font-size:13px;margin-bottom:2px">${esc(order.orderId)}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(order.customer||'-')}</div>
+    ${itemLines}
+  `;
+  el.classList.toggle('warn', kind==='warn');
+  el.classList.add('show');
+  el.onclick = () => {
+    clearTimeout(verifyPopupTimer);
+    el.classList.remove('show');
+    openVerifyOrder(order.orderId);
+  };
+  clearTimeout(verifyPopupTimer);
+  verifyPopupTimer = setTimeout(() => { el.classList.remove('show'); }, 1800);
+}
+
 async function handleVerifyLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
@@ -1744,7 +1783,7 @@ async function handleVerifyLookupScan(raw){
 
   if(verifyStatusOf(order) === 'verified'){
     beep('warn');
-    showFeedback('warn', '⚠ ซ้ำ — ออเดอร์ '+order.orderId+' สแกนไปแล้ว');
+    showVerifyPopup(order, 'warn');
     return;
   }
 
@@ -1756,12 +1795,7 @@ async function handleVerifyLookupScan(raw){
   if(idx>=0) State.verifyOrders[idx] = order;
 
   beep('done');
-  speakVerifyDone();
-  showFeedback('success', '✅ สแกนแล้ว เตรียมจัดส่ง — '+order.orderId);
-  document.getElementById('main').innerHTML = renderVerifyList();
-  wireVerifyList();
-  const inp = document.getElementById('verify-scan-input');
-  if(inp) inp.focus();
+  showVerifyPopup(order, 'success');
 }
 
 async function openVerifyOrder(orderId){
@@ -1914,7 +1948,6 @@ async function handleVerifyScan(code){
 
   if(allVerified){
     showFeedback('success', '✅ ตรวจสอบออเดอร์ '+o.orderId+' ครบแล้ว พร้อมส่ง! ไปสแกนใบปะหน้าถัดไปได้เลย');
-    speakVerifyDone();
     render();
     setTimeout(async () => {
       await stopCamera();
