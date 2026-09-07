@@ -316,6 +316,7 @@
   </header>
   <nav class="tabs">
     <button id="tab-staff" class="active">สแกนแพ็ค</button>
+    <button id="tab-verify">ตรวจก่อนส่ง</button>
     <button id="tab-admin">อัปโหลดออเดอร์</button>
     <button id="tab-print">พิมพ์บาร์โค้ด</button>
     <button id="tab-sets">ตั้งค่าเซท</button>
@@ -579,11 +580,11 @@ function beep(type){
   }catch(e){}
 }
 
-function speakPackDone(){
+function speakText(text){
   try{
     if(!('speechSynthesis' in window)) return;
     const say = () => {
-      const u = new SpeechSynthesisUtterance('แพคครบแล้ว');
+      const u = new SpeechSynthesisUtterance(text);
       u.lang = 'th-TH';
       u.pitch = 1.7;   // สูงขึ้น ให้ฟังดูเป็นเสียงเด็กผู้หญิง
       u.rate = 1.05;
@@ -605,6 +606,8 @@ function speakPackDone(){
     }
   }catch(e){}
 }
+function speakPackDone(){ speakText('แพคครบแล้ว'); }
+function speakVerifyDone(){ speakText('ตรวจสอบครบแล้ว พร้อมส่ง'); }
 
 function showFeedback(kind, text){
   const f = document.getElementById('feedback');
@@ -626,6 +629,10 @@ const State = {
   search: '',
   html5Qr: null,
   camActive: false,
+  verifySub: 'list',
+  currentVerifyOrder: null,
+  verifyOrders: [],
+  lastVerifyScan: null,
   uploadParsed: null, // {headers, rows}
   printCodes: [], // [{code, name}]
   printQty: {}, // code -> qty to print
@@ -844,6 +851,22 @@ function orderProgress(order){
   return {scanned, total};
 }
 
+function verifyProgress(order){
+  let total=0, verified=0;
+  order.items.forEach(it => { total += it.qtyRequired; verified += Math.min(it.qtyVerified||0, it.qtyRequired); });
+  return {verified, total};
+}
+// an order can only be verified once it's fully packed — this mirrors orderStatus()
+// but tracks a separate, independent counter (qtyVerified) so the final QC pass never
+// touches the original packing counts
+function verifyStatusOf(order){
+  if(orderStatus(order) !== 'done') return 'not_packed';
+  const p = verifyProgress(order);
+  if(p.verified===0) return 'pending';
+  if(p.verified>=p.total) return 'verified';
+  return 'progress';
+}
+
 async function saveOrder(date, order){
   order.updatedAt = Date.now();
   await sSet(orderKey(date, order.orderId), JSON.stringify(order), true);
@@ -853,6 +876,7 @@ async function saveOrder(date, order){
 function setTab(tab){
   State.view = tab;
   document.getElementById('tab-staff').classList.toggle('active', tab==='staff');
+  document.getElementById('tab-verify').classList.toggle('active', tab==='verify');
   document.getElementById('tab-admin').classList.toggle('active', tab==='admin');
   document.getElementById('tab-print').classList.toggle('active', tab==='print');
   document.getElementById('tab-sets').classList.toggle('active', tab==='sets');
@@ -860,6 +884,7 @@ function setTab(tab){
   render();
 }
 document.getElementById('tab-staff').onclick = () => setTab('staff');
+document.getElementById('tab-verify').onclick = () => setTab('verify');
 document.getElementById('tab-admin').onclick = () => setTab('admin');
 document.getElementById('tab-print').onclick = () => setTab('print');
 document.getElementById('tab-sets').onclick = () => setTab('sets');
@@ -879,6 +904,16 @@ async function render(){
     await refreshSets();
     main.innerHTML = renderSets();
     wireSets();
+  } else if(State.view==='verify'){
+    if(State.verifySub==='detail' && State.currentVerifyOrder){
+      main.innerHTML = renderVerifyDetail();
+      wireVerifyDetail();
+    } else {
+      main.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+      await refreshVerifyList();
+      main.innerHTML = renderVerifyList();
+      wireVerifyList();
+    }
   } else {
     if(State.staffSub==='detail' && State.currentOrder){
       main.innerHTML = renderDetail();
@@ -1551,6 +1586,347 @@ async function handleOrderLookupScan(raw){
   beep('success');
   await stopCamera();
   await openOrder(match.orderId);
+}
+
+/* ============ VERIFY BEFORE SHIPPING (final QC pass after packing) ============ */
+async function refreshVerifyList(){
+  await loadDateIndex();
+  if(!State.dates.includes(State.date)){
+    if(State.dates.length){ State.date = State.dates[0]; }
+  }
+  State.verifyOrders = State.date ? await loadOrdersForDate(State.date) : [];
+}
+
+function renderVerifyList(){
+  const dateOptions = State.dates.length
+    ? State.dates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('')
+    : `<option>ยังไม่มีข้อมูล</option>`;
+
+  const packedOrders = State.verifyOrders.filter(o => orderStatus(o)==='done');
+  const verifiedCount = packedOrders.filter(o => verifyStatusOf(o)==='verified').length;
+  const pendingCount = packedOrders.length - verifiedCount;
+
+  const filtered = packedOrders.filter(o => {
+    if(!State.search) return true;
+    const s = State.search.toLowerCase();
+    return o.orderId.toLowerCase().includes(s) || (o.customer||'').toLowerCase().includes(s);
+  }).sort((a,b) => {
+    const ra = verifyStatusOf(a)==='verified' ? 1 : 0;
+    const rb = verifyStatusOf(b)==='verified' ? 1 : 0;
+    if(ra!==rb) return ra-rb; // not-yet-verified first
+    return a.orderId.localeCompare(b.orderId);
+  });
+
+  let listHtml;
+  if(!State.date || packedOrders.length===0){
+    listHtml = `<div class="empty"><div class="big">📋</div>ยังไม่มีออเดอร์ที่แพ็คครบพร้อมตรวจสอบ<br><span class="muted" style="font-size:13px">ต้องแพ็คในแท็บ "สแกนแพ็ค" ให้ครบก่อน ถึงจะมาตรวจสอบที่นี่ได้</span></div>`;
+  } else if(filtered.length===0){
+    listHtml = `<div class="empty">ไม่พบออเดอร์ที่ค้นหา</div>`;
+  } else {
+    listHtml = filtered.map(o => {
+      const vst = verifyStatusOf(o);
+      const vprog = verifyProgress(o);
+      const label = vst==='verified' ? 'ตรวจสอบแล้ว' : 'รอตรวจสอบ';
+      return `<div class="order-item ${vst==='verified'?'done':'pending'}" data-id="${esc(o.orderId)}">
+        <div class="meta">
+          <div class="oid">${esc(o.orderId)}</div>
+          <div class="cust">${esc(o.customer||'-')}</div>
+          ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
+          ${o.packedBy ? `<div class="muted" style="font-size:11px;margin-top:1px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div class="progtext">${vprog.verified}/${vprog.total} ชิ้น</div>
+          <span class="pill ${vst==='verified'?'done':'pending'}">${label}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  return `
+    <div class="order-scan-card">
+      <div class="osc-title">🔎 สแกนใบปะหน้าเพื่อตรวจสอบก่อนส่ง</div>
+      <div id="cam-wrap"><div id="reader"></div><div class="scan-line"></div></div>
+      <input type="text" id="verify-scan-input" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      <button class="btn" id="verify-cam-toggle">📷 เปิดกล้องสแกนใบปะหน้า</button>
+    </div>
+    <div class="row" style="align-items:flex-end">
+      <div>
+        <label>วันที่รับออเดอร์</label>
+        <select id="verify-date-select">${dateOptions}</select>
+      </div>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="num">${packedOrders.length}</div><div class="lbl">แพ็คครบแล้ว</div></div>
+      <div class="stat"><div class="num" style="color:var(--success)">${verifiedCount}</div><div class="lbl">ตรวจสอบแล้ว</div></div>
+      <div class="stat"><div class="num" style="color:var(--danger)">${pendingCount}</div><div class="lbl">รอตรวจสอบ</div></div>
+    </div>
+    <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
+    <div id="order-list">${listHtml}</div>
+  `;
+}
+
+function wireVerifyList(){
+  const verifyScanInput = document.getElementById('verify-scan-input');
+  if(verifyScanInput){
+    verifyScanInput.onkeydown = (e) => {
+      if(e.key==='Enter'){
+        const v = verifyScanInput.value.trim();
+        verifyScanInput.value = '';
+        if(v) handleVerifyLookupScan(v);
+      }
+    };
+  }
+  const verifyCamToggle = document.getElementById('verify-cam-toggle');
+  if(verifyCamToggle){
+    verifyCamToggle.onclick = async () => {
+      if(State.camActive){
+        await stopCamera();
+        verifyCamToggle.textContent = '📷 เปิดกล้องสแกนใบปะหน้า';
+        verifyCamToggle.disabled = false;
+      } else {
+        verifyCamToggle.disabled = true;
+        verifyCamToggle.textContent = 'กำลังเปิดกล้อง...';
+        const ok = await startCamera(handleVerifyLookupScan);
+        verifyCamToggle.disabled = false;
+        verifyCamToggle.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนใบปะหน้า';
+      }
+    };
+  }
+  const dsel = document.getElementById('verify-date-select');
+  if(dsel){
+    dsel.onchange = async (e) => {
+      State.date = e.target.value;
+      main_loading();
+      await refreshVerifyList();
+      document.getElementById('main').innerHTML = renderVerifyList();
+      wireVerifyList();
+    };
+  }
+  const sb = document.getElementById('search-box');
+  if(sb){
+    sb.oninput = (e) => {
+      const caret = e.target.selectionStart;
+      State.search = e.target.value;
+      document.getElementById('main').innerHTML = renderVerifyList();
+      wireVerifyList();
+      const sb2 = document.getElementById('search-box');
+      if(sb2){ sb2.focus(); sb2.setSelectionRange(caret, caret); }
+    };
+  }
+  document.querySelectorAll('.order-item').forEach(el => {
+    el.onclick = () => openVerifyOrder(el.getAttribute('data-id'));
+  });
+}
+
+async function handleVerifyLookupScan(raw){
+  const code = raw.trim();
+  if(!code) return;
+  let match = State.verifyOrders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
+  if(!match){
+    match = State.verifyOrders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
+  }
+  if(!match){
+    beep('error');
+    showFeedback('danger', '✕ ไม่พบออเดอร์ที่ตรงกับ "'+code+'" ในวันที่ '+fmtDateTH(State.date));
+    return;
+  }
+  if(orderStatus(match) !== 'done'){
+    const p = orderProgress(match);
+    beep('warn');
+    showFeedback('warn', '⚠ ออเดอร์นี้ยังแพ็คไม่ครบ ('+p.scanned+'/'+p.total+' ชิ้น) — ไปแพ็คให้ครบก่อนที่แท็บ "สแกนแพ็ค"');
+    return;
+  }
+  beep('success');
+  await stopCamera();
+  await openVerifyOrder(match.orderId);
+}
+
+async function openVerifyOrder(orderId){
+  const raw = await sGet(orderKey(State.date, orderId), true);
+  State.currentVerifyOrder = raw ? JSON.parse(raw) : null;
+  State.verifySub = 'detail';
+  if(State.currentVerifyOrder){
+    const toLoad = State.currentVerifyOrder.items.filter(it => !(it.code in State.photoCache));
+    await mapWithConcurrency(toLoad, 6, async it => {
+      const v = await sGetWithRetry(photoKey(it.code), true);
+      State.photoCache[it.code] = v || null;
+    });
+  }
+  render();
+}
+
+function renderVerifyDetail(){
+  const o = State.currentVerifyOrder;
+  const vst = verifyStatusOf(o);
+  const vprog = verifyProgress(o);
+  const items = o.items.map((it, idx) => {
+    const qv = it.qtyVerified || 0;
+    const done = qv >= it.qtyRequired;
+    const over = qv > it.qtyRequired;
+    const photo = State.photoCache[it.code];
+    const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : `<div class="item-photo" style="display:flex;align-items:center;justify-content:center;font-size:26px">🏷️</div>`;
+    return `<div class="item-row ${done?'done':''}">
+      <div class="check">${done?'✓':''}</div>
+      ${photoHtml}
+      <div class="item-info">
+        <div class="name">${esc(it.name)}</div>
+        <div class="code">${esc(it.code)}</div>
+      </div>
+      <div class="item-qty ${over?'over':''}">${qv}/${it.qtyRequired}</div>
+      <div class="adjust">
+        <button data-vadj="-1" data-idx="${idx}">−</button>
+        <button data-vadj="1" data-idx="${idx}">+</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const doneBanner = vst==='verified' ? `<div class="banner-done">
+      <div class="big">✅ ตรวจสอบครบแล้ว พร้อมส่ง</div>
+      <div class="time">${o.verifiedBy ? 'ตรวจสอบโดย '+esc(o.verifiedBy)+' · ' : ''}${o.verifiedAt ? new Date(o.verifiedAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+    </div>` : '';
+
+  return `
+    <button class="back" id="verify-back-btn">‹ กลับไปรายการตรวจสอบ</button>
+    <div class="detail-header">
+      <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+      <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · ตรวจสอบแล้ว ${vprog.verified}/${vprog.total} ชิ้น</div>
+      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
+      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+      ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+    </div>
+    ${doneBanner}
+
+    <div class="scan-bar">
+      <div id="cam-wrap">
+        <div id="reader"></div>
+        <div class="scan-line"></div>
+      </div>
+      <div class="scan-input-row">
+        <input type="text" id="scan-input" placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัสสินค้าแล้วกด Enter" autocomplete="off" autocapitalize="off">
+      </div>
+      <button class="btn" id="cam-toggle">📷 เปิดกล้องสแกนบาร์โค้ด</button>
+    </div>
+
+    <h2 class="section">รายการที่ต้องตรวจสอบ</h2>
+    <div id="items-wrap">${items}</div>
+  `;
+}
+
+function wireVerifyDetail(){
+  document.getElementById('verify-back-btn').onclick = async () => {
+    await stopCamera();
+    State.verifySub = 'list';
+    State.currentVerifyOrder = null;
+    main_loading();
+    await refreshVerifyList();
+    document.getElementById('main').innerHTML = renderVerifyList();
+    wireVerifyList();
+  };
+  const scanInput = document.getElementById('scan-input');
+  if(scanInput){
+    scanInput.focus();
+    scanInput.onkeydown = (e) => {
+      if(e.key==='Enter'){
+        const v = scanInput.value.trim();
+        scanInput.value = '';
+        if(v) handleVerifyScan(v);
+      }
+    };
+  }
+  document.getElementById('cam-toggle').onclick = async () => {
+    const btn = document.getElementById('cam-toggle');
+    if(State.camActive){
+      await stopCamera();
+      btn.textContent = '📷 เปิดกล้องสแกนบาร์โค้ด';
+      btn.disabled = false;
+    } else {
+      btn.disabled = true;
+      btn.textContent = 'กำลังเปิดกล้อง...';
+      const ok = await startCamera(handleVerifyScan);
+      btn.disabled = false;
+      btn.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนบาร์โค้ด';
+    }
+  };
+  document.querySelectorAll('[data-vadj]').forEach(btn => {
+    btn.onclick = async () => {
+      const idx = parseInt(btn.getAttribute('data-idx'));
+      const delta = parseInt(btn.getAttribute('data-vadj'));
+      const o = State.currentVerifyOrder;
+      const it = o.items[idx];
+      let qv = (it.qtyVerified || 0) + delta;
+      if(qv < 0) qv = 0;
+      it.qtyVerified = qv;
+      if(verifyStatusOf(o) !== 'verified'){ o.verifiedAt = null; o.verifiedBy = null; }
+      await saveOrder(State.date, o);
+      render();
+    };
+  });
+}
+
+async function handleVerifyScan(code){
+  const o = State.currentVerifyOrder;
+  const idx = o.items.findIndex(it => it.code.toLowerCase() === code.toLowerCase());
+  if(idx === -1){
+    beep('error');
+    showFeedback('danger', '✕ ไม่พบรหัส "'+code+'" ในออเดอร์นี้');
+    return;
+  }
+  const it = o.items[idx];
+  const qv = it.qtyVerified || 0;
+  if(qv >= it.qtyRequired){
+    beep('warn');
+    showFeedback('warn', '⚠ '+it.name+' ตรวจสอบครบแล้ว ('+it.qtyRequired+')');
+    return;
+  }
+  it.qtyVerified = qv + 1;
+  const staff = State.staffName || 'ไม่ระบุชื่อ';
+  State.lastVerifyScan = { orderId: o.orderId, code: it.code, idx, ts: Date.now() };
+  const allVerified = verifyStatusOf(o) === 'verified';
+  if(allVerified){
+    o.verifiedAt = Date.now();
+    o.verifiedBy = staff;
+  }
+  await saveOrder(State.date, o);
+  beep(allVerified ? 'done' : 'success');
+
+  if(allVerified){
+    showFeedback('success', '✅ ตรวจสอบออเดอร์ '+o.orderId+' ครบแล้ว พร้อมส่ง! ไปสแกนใบปะหน้าถัดไปได้เลย');
+    speakVerifyDone();
+    render();
+    setTimeout(async () => {
+      await stopCamera();
+      State.verifySub = 'list';
+      State.currentVerifyOrder = null;
+      main_loading();
+      await refreshVerifyList();
+      render();
+      const inp = document.getElementById('verify-scan-input');
+      if(inp) inp.focus();
+    }, 1300);
+    return;
+  }
+
+  showFeedback('success', '✓ '+it.name+' ('+it.qtyVerified+'/'+it.qtyRequired+')');
+  render();
+  setTimeout(() => { const inp = document.getElementById('scan-input'); if(inp) inp.focus(); }, 50);
+}
+
+async function undoLastVerifyScan(){
+  const ls = State.lastVerifyScan;
+  const o = State.currentVerifyOrder;
+  if(!ls || !o || ls.orderId !== o.orderId) return;
+  const it = o.items[ls.idx];
+  if(!it || it.code !== ls.code){ State.lastVerifyScan = null; render(); return; }
+  if(!it.qtyVerified || it.qtyVerified <= 0){ State.lastVerifyScan = null; render(); return; }
+  it.qtyVerified--;
+  o.verifiedAt = null;
+  o.verifiedBy = null;
+  await saveOrder(State.date, o);
+  beep('warn');
+  showFeedback('warn', '↩️ ยกเลิกแล้ว: '+it.name);
+  State.lastVerifyScan = null;
+  render();
+  setTimeout(() => { const inp = document.getElementById('scan-input'); if(inp) inp.focus(); }, 50);
 }
 
 /* ============ CAMERA SCANNER ============ */
