@@ -1736,9 +1736,32 @@ async function handleVerifyLookupScan(raw){
     showFeedback('warn', '⚠ ออเดอร์นี้ยังแพ็คไม่ครบ ('+p.scanned+'/'+p.total+' ชิ้น) — ไปแพ็คให้ครบก่อนที่แท็บ "สแกนแพ็ค"');
     return;
   }
-  beep('success');
-  await stopCamera();
-  await openVerifyOrder(match.orderId);
+
+  // one scan of the shipping label = the whole order is confirmed ready to ship — no
+  // need to re-scan every item individually again
+  const raw2 = await sGet(orderKey(State.date, match.orderId), true);
+  const order = raw2 ? JSON.parse(raw2) : match;
+
+  if(verifyStatusOf(order) === 'verified'){
+    beep('warn');
+    showFeedback('warn', '⚠ ซ้ำ — ออเดอร์ '+order.orderId+' สแกนไปแล้ว');
+    return;
+  }
+
+  order.items.forEach(it => { it.qtyVerified = it.qtyRequired; });
+  order.verifiedAt = Date.now();
+  order.verifiedBy = State.staffName || 'ไม่ระบุชื่อ';
+  await saveOrder(State.date, order);
+  const idx = State.verifyOrders.findIndex(o => o.orderId === order.orderId);
+  if(idx>=0) State.verifyOrders[idx] = order;
+
+  beep('done');
+  speakVerifyDone();
+  showFeedback('success', '✅ สแกนแล้ว เตรียมจัดส่ง — '+order.orderId);
+  document.getElementById('main').innerHTML = renderVerifyList();
+  wireVerifyList();
+  const inp = document.getElementById('verify-scan-input');
+  if(inp) inp.focus();
 }
 
 async function openVerifyOrder(orderId){
