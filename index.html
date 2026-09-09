@@ -1226,16 +1226,33 @@ function exportStockReport(date, orders){
     ['หมายเหตุ', 'ออเดอร์ที่แพ็คก่อนมีระบบบันทึกชื่อผู้แพ็ค จะนับรวมไว้ที่ "ไม่ระบุชื่อ" หรือใช้ชื่อล่าสุดที่แตะออเดอร์นั้นเป็นตัวประมาณ']
   ];
 
+  // --- item-level detail: every SKU inside every order, in one flat list, so nobody has
+  // to open each order individually just to see what's inside it ---
+  const itemDetailData = [
+    ['Order ID', 'ลูกค้า', 'เลขพัสดุ', 'รหัสสินค้า (SKU)', 'ชื่อสินค้า', 'จำนวนที่ต้องแพ็ค', 'จำนวนที่แพ็คแล้ว', 'สถานะรายชิ้น', 'แพ็คโดย']
+  ];
+  orders.forEach(o => {
+    o.items.forEach(it => {
+      const req = it.qtyRequired||0, scanned = it.qtyScanned||0;
+      const itemStatus = scanned>=req && req>0 ? 'ครบแล้ว' : (scanned>0 ? 'บางส่วน' : 'ยังไม่แพ็ค');
+      itemDetailData.push([o.orderId, o.customer||'-', o.tracking||'-', it.code, it.name||it.code, req, scanned, itemStatus, o.packedBy||'-']);
+    });
+  });
+
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{wch:16},{wch:50},{wch:20},{wch:24}];
   const wsByOrder = XLSX.utils.aoa_to_sheet(byOrderData);
   wsByOrder['!cols'] = [{wch:22},{wch:22},{wch:20},{wch:14},{wch:18},{wch:16}];
   const wsByStaff = XLSX.utils.aoa_to_sheet(byStaffData);
   wsByStaff['!cols'] = [{wch:18},{wch:18},{wch:22}];
+  const wsItemDetail = XLSX.utils.aoa_to_sheet(itemDetailData);
+  wsItemDetail['!cols'] = [{wch:22},{wch:22},{wch:20},{wch:16},{wch:40},{wch:16},{wch:16},{wch:14},{wch:16}];
+  if(wsItemDetail['!ref']) wsItemDetail['!autofilter'] = { ref: wsItemDetail['!ref'] };
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'สรุปสต็อก');
   XLSX.utils.book_append_sheet(wb, wsByOrder, 'แพ็คโดย (แยกออเดอร์)');
+  XLSX.utils.book_append_sheet(wb, wsItemDetail, 'รายการสินค้าในแต่ละออเดอร์');
   XLSX.utils.book_append_sheet(wb, wsByStaff, 'สรุปตามพนักงาน');
   XLSX.writeFile(wb, 'สรุปสต็อกที่แพ็ค_'+date+'.xlsx');
 
