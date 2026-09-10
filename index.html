@@ -2442,13 +2442,22 @@ function wireAdmin(){
 
       const mergedItems = [];
       let anyMemberEdited = false;
+      const addedEditedDocKeys = new Set(); // an edited doc that's already a combined doc is
+      // shared across ALL of its original ids — e.g. 3 member ids all point back at the SAME
+      // already-merged edited doc. Adding its item list once per member would triple/quadruple
+      // the quantities, since that one doc's items already represent the sum across them all.
       group.forEach(o => {
         // if THIS order's own previous save was manually edited by staff (product swap),
         // trust that edited item list over whatever the freshly-uploaded file says for
         // it — otherwise the swap silently reverts and shows the swapped item un-packed
+        const ownKey = prevByOriginalId[o.orderId];
         const ownPrevDoc = perOrderDoc[o.orderId];
         const editedSource = ownPrevDoc && ownPrevDoc.itemsManuallyEdited && Array.isArray(ownPrevDoc.items);
-        if(editedSource) anyMemberEdited = true;
+        if(editedSource){
+          anyMemberEdited = true;
+          if(addedEditedDocKeys.has(ownKey)) return; // this edited doc's items were already folded in via a sibling member
+          addedEditedDocKeys.add(ownKey);
+        }
         const sourceItems = editedSource ? ownPrevDoc.items : o.items;
         sourceItems.forEach(it => {
           const existing = mergedItems.find(m => m.code === it.code);
