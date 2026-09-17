@@ -269,10 +269,20 @@
 
   /* upload mapping */
   .map-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
-  .preview-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
+  .preview-table{width:max-content;min-width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
   .preview-table th,.preview-table td{border:1px solid var(--border);padding:5px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
   .preview-table th{background:var(--surface2);color:var(--muted);font-weight:600;}
-  .preview-wrap{overflow-x:auto;}
+  .preview-wrap{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch;}
+  /* กันตารางตัวอย่าง (บางไฟล์มี 60+ คอลัมน์) ดันความกว้างจนปุ่มด้านล่างหลุดออกนอกจอ */
+  main, .card, .row{min-width:0;}
+  .card{max-width:100%;overflow-wrap:anywhere;}
+  /* แถบปุ่มยืนยันของหน้าจับคู่คอลัมน์ — ลอยติดขอบล่างเสมอ จะได้ไม่ต้องเลื่อนหา */
+  .row.sticky-actions{
+    position:sticky;bottom:0;z-index:15;
+    background:var(--surface);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid var(--border);border-radius:16px;padding:10px;margin-top:4px;
+    box-shadow:var(--glass-shadow);
+  }
   .toast{
     position:fixed;top:14px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,.7);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--border);
     padding:10px 16px;border-radius:14px;font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(20,30,45,.18);max-width:90%;color:var(--text);
@@ -313,7 +323,7 @@
     #app{
       max-width:1440px;
       display:grid;
-      grid-template-columns:230px 1fr;
+      grid-template-columns:230px minmax(0,1fr);
       grid-template-rows:auto auto auto 1fr;
       grid-template-areas:
         "sidebar stripes"
@@ -331,7 +341,8 @@
     .stripes{grid-area:stripes;}
     #setup-banner{grid-area:banner;}
     header.top{grid-area:header;}
-    main{grid-area:main; padding:26px 32px 32px; padding-bottom:32px;}
+    main{grid-area:main; padding:26px 32px 32px; padding-bottom:32px; min-width:0; max-width:100%;}
+    #app > *{min-width:0;}
 
     nav.tabs{
       grid-area:sidebar;
@@ -2333,7 +2344,7 @@ function renderAdmin(){
       <div class="muted" style="font-size:12px;margin:10px 0 4px">ตัวอย่างข้อมูล</div>
       ${previewHtml}
     </div>
-    <div class="row">
+    <div class="row sticky-actions">
       <button class="btn secondary" id="cancel-upload">ยกเลิก</button>
       <button class="btn" id="confirm-upload">นำเข้าข้อมูล ${effRows.length} แถว</button>
     </div>
