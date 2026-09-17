@@ -140,6 +140,8 @@
     border-bottom:3px solid transparent;cursor:pointer;
   }
   nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
+  nav.tabs .tab-ic{margin-right:4px;}
+  .sidebar-brand{display:none;}
 
   main{flex:1;padding:16px;padding-bottom:90px;}
 
@@ -173,6 +175,7 @@
   .pill.pending{background:var(--surface2);color:var(--muted);}
   .pill.progress{background:var(--warn-dim);color:var(--warn);}
   .pill.done{background:var(--success-dim);color:var(--success);}
+  .pill.cancelled{background:var(--danger-dim);color:var(--danger);}
   .empty{text-align:center;padding:40px 16px;color:var(--muted);}
   .empty .big{font-size:40px;margin-bottom:8px;}
 
@@ -185,6 +188,8 @@
   .order-item.pending{border-left-color:var(--muted);}
   .order-item.progress{border-left-color:var(--warn);}
   .order-item.done{border-left-color:var(--success);}
+  .order-item.cancelled{border-left-color:var(--danger);opacity:.55;}
+  .order-item.cancelled .oid{text-decoration:line-through;}
   .order-item .oid{font-family:var(--mono);font-weight:700;font-size:14px;}
   .order-item .meta{flex:1;min-width:0;}
   .order-item .cust{font-size:13px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -256,6 +261,11 @@
   }
   .banner-done .big{font-family:var(--disp);font-size:20px;font-weight:700;color:var(--success);text-transform:uppercase;}
   .banner-done .time{font-size:12px;color:var(--muted);margin-top:4px;font-family:var(--mono);}
+  .banner-cancelled{
+    background:var(--danger-dim);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--danger);border-radius:16px;padding:18px;text-align:center;margin-bottom:14px;
+  }
+  .banner-cancelled .big{font-family:var(--disp);font-size:20px;font-weight:700;color:var(--danger);text-transform:uppercase;}
+  .banner-cancelled .time{font-size:12px;color:var(--muted);margin-top:4px;font-family:var(--mono);}
 
   /* upload mapping */
   .map-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;}
@@ -296,6 +306,67 @@
   .label .lname{font-size:11px;font-weight:700;text-align:center;line-height:1.2;max-height:26px;overflow:hidden;margin-bottom:2px;}
   .label svg{max-width:100%;}
   .label .lcode{font-size:11px;font-family:monospace;letter-spacing:1px;margin-top:2px;}
+
+  /* ============ DESKTOP / PC LAYOUT ============ */
+  @media (min-width:900px){
+    body{ padding:24px; }
+    #app{
+      max-width:1440px;
+      display:grid;
+      grid-template-columns:230px 1fr;
+      grid-template-rows:auto auto auto 1fr;
+      grid-template-areas:
+        "sidebar stripes"
+        "sidebar banner"
+        "sidebar header"
+        "sidebar main";
+      min-height:calc(100vh - 48px);
+      border-radius:24px;
+      overflow:hidden;
+      background:rgba(255,255,255,.25);
+      backdrop-filter:blur(30px) saturate(180%);
+      -webkit-backdrop-filter:blur(30px) saturate(180%);
+      box-shadow:0 30px 80px rgba(15,25,40,.18);
+    }
+    .stripes{grid-area:stripes;}
+    #setup-banner{grid-area:banner;}
+    header.top{grid-area:header;}
+    main{grid-area:main; padding:26px 32px 32px; padding-bottom:32px;}
+
+    nav.tabs{
+      grid-area:sidebar;
+      flex-direction:column;
+      align-items:stretch;
+      gap:4px;
+      padding:18px 14px;
+      position:sticky;top:0;
+      height:100%;
+      border-bottom:none;
+      border-right:1px solid var(--border);
+    }
+    .sidebar-brand{
+      display:flex;align-items:center;gap:8px;
+      font-family:var(--disp);font-weight:700;font-size:16px;letter-spacing:.4px;text-transform:uppercase;
+      padding:8px 10px 18px;color:var(--text);
+    }
+    nav.tabs button{
+      flex:none;display:flex;align-items:center;gap:10px;
+      text-align:left;padding:12px 14px;border-radius:14px;
+      border-bottom:none;font-size:13px;letter-spacing:.2px;
+    }
+    nav.tabs .tab-ic{font-size:16px;margin-right:0;}
+    nav.tabs button.active{
+      background:linear-gradient(155deg,var(--accent-2,var(--accent)),var(--accent));
+      color:#fff;box-shadow:0 8px 20px rgba(224,138,0,.35);
+    }
+    nav.tabs button:not(.active):hover{background:var(--surface2);}
+
+    /* let the order grid use the extra width instead of a single stacked column */
+    #order-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start;}
+    #order-list .order-item{margin-bottom:0;}
+    .stats-row{flex-wrap:wrap;}
+    .stats-row .stat{min-width:150px;}
+  }
   @media print{
     @page{margin:6mm;}
     body *{visibility:hidden;}
@@ -325,11 +396,12 @@
     <div class="sub">เช็คสแกนสินค้าก่อนแพ็คส่ง — กันของผิด กันแพ็คตก</div>
   </header>
   <nav class="tabs">
-    <button id="tab-staff" class="active">สแกนแพ็ค</button>
-    <button id="tab-verify">ตรวจก่อนส่ง</button>
-    <button id="tab-admin">อัปโหลดออเดอร์</button>
-    <button id="tab-print">พิมพ์บาร์โค้ด</button>
-    <button id="tab-sets">ตั้งค่าเซท</button>
+    <div class="sidebar-brand"><span class="dot"></span>PackCheck</div>
+    <button id="tab-staff" class="active"><span class="tab-ic">📦</span><span class="tab-label">สแกนแพ็ค</span></button>
+    <button id="tab-verify"><span class="tab-ic">✅</span><span class="tab-label">ตรวจก่อนส่ง</span></button>
+    <button id="tab-admin"><span class="tab-ic">⬆️</span><span class="tab-label">อัปโหลดออเดอร์</span></button>
+    <button id="tab-print"><span class="tab-ic">🖨️</span><span class="tab-label">พิมพ์บาร์โค้ด</span></button>
+    <button id="tab-sets"><span class="tab-ic">⚙️</span><span class="tab-label">ตั้งค่าเซท</span></button>
   </nav>
   <main id="main"></main>
   <div id="label-sheet"></div>
@@ -730,7 +802,7 @@ async function loadOrdersForDate(date){
   const orders = results.filter(Boolean);
   orders.sort((a,b) => {
     const sa = orderStatus(a), sb = orderStatus(b);
-    const rank = {pending:0, progress:1, done:2};
+    const rank = {pending:0, progress:1, done:2, cancelled:3};
     if(rank[sa]!==rank[sb]) return rank[sa]-rank[sb];
     return a.orderId.localeCompare(b.orderId);
   });
@@ -850,11 +922,17 @@ async function loadAllSetDefs(){
 }
 
 function orderStatus(order){
+  if(order.cancelled) return 'cancelled';
   let total=0, scanned=0;
   order.items.forEach(it => { total += it.qtyRequired; scanned += Math.min(it.qtyScanned, it.qtyRequired); });
   if(scanned===0) return 'pending';
   if(scanned>=total) return 'done';
   return 'progress';
+}
+async function setOrderCancelled(date, order, cancelled){
+  order.cancelled = cancelled;
+  order.cancelledAt = cancelled ? Date.now() : null;
+  await saveOrder(date, order);
 }
 function orderProgress(order){
   let total=0, scanned=0;
@@ -954,6 +1032,7 @@ async function refreshStaffList(){
   // what actually shipped out so far, not what was merely ordered
   const map = {}; // code -> {name, qty}
   State.orders.forEach(o => {
+    if(o.cancelled) return; // cancelled orders never shipped — keep them out of the stock summary
     o.items.forEach(it => {
       if(!it.qtyScanned) return;
       if(!map[it.code]) map[it.code] = { code: it.code, name: it.name || it.code, qty: 0 };
@@ -987,9 +1066,11 @@ function renderStaffList(){
     : `<option>ยังไม่มีข้อมูล</option>`;
 
   const total = State.orders.length;
+  const cancelled = State.orders.filter(o => orderStatus(o)==='cancelled').length;
+  const activeTotal = total - cancelled;
   const done = State.orders.filter(o => orderStatus(o)==='done').length;
   const progress = State.orders.filter(o => orderStatus(o)==='progress').length;
-  const ordersRemaining = total - done;
+  const ordersRemaining = activeTotal - done;
 
   const filtered = State.orders.filter(o => {
     if(!State.search) return true;
@@ -1006,7 +1087,7 @@ function renderStaffList(){
     listHtml = filtered.map(o => {
       const st = orderStatus(o);
       const prog = orderProgress(o);
-      const label = st==='done' ? 'ครบถ้วน' : st==='progress' ? 'กำลังแพ็ค' : 'รอแพ็ค';
+      const label = st==='cancelled' ? 'ยกเลิกแล้ว' : st==='done' ? 'ครบถ้วน' : st==='progress' ? 'กำลังแพ็ค' : 'รอแพ็ค';
       return `<div class="order-item ${st}" data-id="${esc(o.orderId)}">
         <div class="meta">
           <div class="oid">${esc(o.orderId)}</div>
@@ -1043,6 +1124,7 @@ function renderStaffList(){
         <div style="font-weight:700">✅ สรุปสินค้าที่แพ็คออกไปแล้ว <span class="muted" style="font-weight:400">(${State.dailySummary.length} รายการ)</span></div>
         <div class="muted" style="font-size:13px">${State.summaryExpanded ? 'ซ่อน ▲' : 'ดูทั้งหมด ▼'}</div>
       </div>
+      ${cancelled>0 ? `<div class="muted" style="font-size:12px;margin-top:6px">ไม่รวมออเดอร์ที่ยกเลิก ${cancelled} รายการ</div>` : ''}
       ${State.summaryExpanded ? (State.dailySummary.length
           ? `<div style="margin-top:12px;max-height:400px;overflow-y:auto">${summaryRows}</div>`
           : `<div class="muted" style="font-size:13px;margin-top:10px">ยังไม่มีสินค้าที่สแกนแพ็คเลยในวันนี้</div>`) : ''}
@@ -1069,6 +1151,7 @@ function renderStaffList(){
       <div class="stat"><div class="num" style="color:var(--warn)">${progress}</div><div class="lbl">กำลังแพ็ค</div></div>
       <div class="stat"><div class="num" style="color:var(--success)">${done}</div><div class="lbl">ครบแล้ว</div></div>
       <div class="stat"><div class="num" style="color:var(--danger)">${ordersRemaining}</div><div class="lbl">ออเดอร์ที่เหลือต้องแพ็ค</div></div>
+      ${cancelled>0 ? `<div class="stat"><div class="num" style="color:var(--danger)">${cancelled}</div><div class="lbl">ยกเลิก</div></div>` : ''}
     </div>
     ${summaryCard}
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
@@ -1160,11 +1243,16 @@ function wireStaffList(){
 function exportStockReport(date, orders){
   if(!date || !orders || orders.length===0){ toast('ไม่มีออเดอร์ของวันนี้ให้สรุป'); return; }
 
+  // cancelled orders never shipped, so they're excluded from every stock/packing total below —
+  // they're still listed (marked "ยกเลิก") in the per-order and item-detail sheets for reference
+  const activeOrders = orders.filter(o => !o.cancelled);
+  const cancelledOrders = orders.filter(o => o.cancelled);
+
   // sum up what was ACTUALLY scanned/packed per product code — this is what physically
   // left the warehouse today, so it's the correct number to deduct from stock (not the
   // ordered qty, which may be higher if an order was only partially packed)
   const totals = {}; // code -> {name, qtyPacked, orderCount}
-  orders.forEach(o => {
+  activeOrders.forEach(o => {
     o.items.forEach(it => {
       if(!it.qtyScanned) return;
       if(!totals[it.code]) totals[it.code] = { name: it.name || it.code, qtyPacked: 0, orderCount: 0 };
@@ -1176,17 +1264,18 @@ function exportStockReport(date, orders){
   const codes = Object.keys(totals).sort((a,b) => a.localeCompare(b));
   if(codes.length===0){ toast('ยังไม่มีสินค้าที่สแกนแพ็คเลยในวันนี้'); return; }
 
-  const doneCount = orders.filter(o => orderStatus(o)==='done').length;
-  const notDoneCount = orders.length - doneCount;
+  const doneCount = activeOrders.filter(o => orderStatus(o)==='done').length;
+  const notDoneCount = activeOrders.length - doneCount;
 
   const wsData = [
     ['รหัสสินค้า (SKU)', 'ชื่อสินค้า', 'จำนวนที่แพ็คไป (ชิ้น)', 'จำนวนออเดอร์ที่มีสินค้านี้'],
     ...codes.map(c => [c, totals[c].name, totals[c].qtyPacked, totals[c].orderCount]),
     [],
-    ['รวมออเดอร์ทั้งหมดของวันนี้', orders.length],
+    ['รวมออเดอร์ทั้งหมดของวันนี้ (ไม่รวมที่ยกเลิก)', activeOrders.length],
     ['ออเดอร์ที่แพ็คครบแล้ว', doneCount]
   ];
   if(notDoneCount>0) wsData.push(['ออเดอร์ที่ยังแพ็คไม่ครบ (ตัวเลขด้านบนนับเฉพาะชิ้นที่สแกนจริงเท่านั้น)', notDoneCount]);
+  if(cancelledOrders.length>0) wsData.push(['ออเดอร์ที่ยกเลิก (ไม่นับรวมในสรุปสต็อกด้านบน)', cancelledOrders.length]);
 
   // --- who packed which order ---
   const byOrderData = [
@@ -1194,7 +1283,7 @@ function exportStockReport(date, orders){
   ];
   orders.forEach(o => {
     const prog = orderProgress(o);
-    const status = orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค');
+    const status = o.cancelled ? 'ยกเลิก' : (orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค'));
     byOrderData.push([o.orderId, o.customer||'-', o.tracking||'-', status, prog.scanned+'/'+prog.total, o.packedBy||'-']);
   });
 
@@ -1207,7 +1296,7 @@ function exportStockReport(date, orders){
     staffTotals[key].items += count;
     staffTotals[key].orderIds.add(orderId);
   };
-  orders.forEach(o => {
+  activeOrders.forEach(o => {
     const totalScanned = o.items.reduce((s,it) => s + (it.qtyScanned||0), 0);
     if(totalScanned===0) return;
     if(Array.isArray(o.activityLog) && o.activityLog.length){
@@ -1234,7 +1323,7 @@ function exportStockReport(date, orders){
   orders.forEach(o => {
     o.items.forEach(it => {
       const req = it.qtyRequired||0, scanned = it.qtyScanned||0;
-      const itemStatus = scanned>=req && req>0 ? 'ครบแล้ว' : (scanned>0 ? 'บางส่วน' : 'ยังไม่แพ็ค');
+      const itemStatus = o.cancelled ? 'ยกเลิก' : (scanned>=req && req>0 ? 'ครบแล้ว' : (scanned>0 ? 'บางส่วน' : 'ยังไม่แพ็ค'));
       itemDetailData.push([o.orderId, o.customer||'-', o.tracking||'-', it.code, it.name||it.code, req, scanned, itemStatus, o.packedBy||'-']);
     });
   });
@@ -1296,8 +1385,8 @@ function renderDetail(){
       </div>
       <div class="item-qty ${over?'over':''}">${it.qtyScanned}/${it.qtyRequired}</div>
       <div class="adjust">
-        <button data-adj="-1" data-idx="${idx}">−</button>
-        <button data-adj="1" data-idx="${idx}">+</button>
+        <button data-adj="-1" data-idx="${idx}" ${st==='cancelled'?'disabled':''}>−</button>
+        <button data-adj="1" data-idx="${idx}" ${st==='cancelled'?'disabled':''}>+</button>
       </div>
     </div>`;
   }).join('');
@@ -1307,18 +1396,16 @@ function renderDetail(){
       <div class="time">อัปเดตล่าสุด ${o.updatedAt ? new Date(o.updatedAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
     </div>` : '';
 
-  return `
-    <button class="back" id="back-btn">‹ กลับไปรายการออเดอร์</button>
-    <div class="detail-header">
-      <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
-      <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
-      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
-      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
-      ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
-      <button class="btn secondary" id="edit-order-btn" style="margin-top:10px">✏️ แก้ไขออเดอร์</button>
-    </div>
-    ${doneBanner}
+  const cancelledBanner = st==='cancelled' ? `<div class="banner-cancelled">
+      <div class="big">🚫 ออเดอร์นี้ถูกยกเลิกแล้ว</div>
+      <div class="time">${o.cancelledAt ? 'ยกเลิกเมื่อ '+new Date(o.cancelledAt).toLocaleString('th-TH',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : ''} — จะไม่ถูกนับรวมในสรุปสต็อก</div>
+    </div>` : '';
 
+  const cancelBtnHtml = st==='cancelled'
+    ? `<button class="btn secondary" id="restore-order-btn" style="margin-top:10px">↩️ กู้คืนออเดอร์</button>`
+    : `<button class="btn danger" id="cancel-order-btn" style="margin-top:10px">❌ ยกเลิกออเดอร์</button>`;
+
+  const scanSection = st==='cancelled' ? `<div class="card muted" style="text-align:center">ออเดอร์นี้ถูกยกเลิกแล้ว จึงไม่ต้องแพ็คต่อ — กด "กู้คืนออเดอร์" หากยกเลิกผิด</div>` : `
     <div class="scan-bar">
       <div id="cam-wrap">
         <div id="reader"></div>
@@ -1331,7 +1418,25 @@ function renderDetail(){
         <button class="btn" id="cam-toggle">📷 เปิดกล้องสแกนบาร์โค้ด</button>
         <button class="btn secondary" id="undo-scan-btn" ${(State.lastScan && State.lastScan.orderId===o.orderId) ? '' : 'disabled'}>↩️ ยกเลิกสแกนล่าสุด</button>
       </div>
+    </div>`;
+
+  return `
+    <button class="back" id="back-btn">‹ กลับไปรายการออเดอร์</button>
+    <div class="detail-header">
+      <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+      <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
+      ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
+      ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+      ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <button class="btn secondary" id="edit-order-btn">✏️ แก้ไขออเดอร์</button>
+        ${cancelBtnHtml}
+      </div>
     </div>
+    ${doneBanner}
+    ${cancelledBanner}
+
+    ${scanSection}
 
     <h2 class="section">รายการที่ต้องแพ็ค</h2>
     <div id="items-wrap">${items}</div>
@@ -1349,6 +1454,7 @@ function wireDetail(){
 
   document.querySelectorAll('[data-adj]').forEach(btn => {
     btn.onclick = async () => {
+      if(orderStatus(State.currentOrder)==='cancelled') return;
       const idx = parseInt(btn.getAttribute('data-idx'));
       const delta = parseInt(btn.getAttribute('data-adj'));
       const it = State.currentOrder.items[idx];
@@ -1364,34 +1470,67 @@ function wireDetail(){
   const editBtn = document.getElementById('edit-order-btn');
   if(editBtn) editBtn.onclick = openEditOrderModal;
 
-  const input = document.getElementById('scan-input');
-  input.focus();
-  input.onkeydown = (e) => {
-    if(e.key==='Enter'){
-      const code = input.value.trim();
-      input.value='';
-      if(code) handleScan(code);
-    }
-  };
-
-  document.getElementById('cam-toggle').onclick = async () => {
-    const btn = document.getElementById('cam-toggle');
-    if(State.camActive){
+  const cancelBtn = document.getElementById('cancel-order-btn');
+  if(cancelBtn){
+    cancelBtn.onclick = async () => {
+      const o = State.currentOrder;
+      const ok = confirm('ยกเลิกออเดอร์ '+o.orderId+' ใช่หรือไม่?\nออเดอร์ที่ยกเลิกจะไม่ถูกนับรวมในสรุปสต็อกที่แพ็คไปแล้ว');
+      if(!ok) return;
       await stopCamera();
-      btn.textContent = '📷 เปิดกล้องสแกนบาร์โค้ด';
-      btn.disabled = false;
-    } else {
-      btn.disabled = true;
-      btn.textContent = 'กำลังเปิดกล้อง...';
-      const ok = await startCamera();
-      btn.disabled = false;
-      btn.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนบาร์โค้ด';
-    }
-  };
+      await setOrderCancelled(State.date, o, true);
+      toast('ยกเลิกออเดอร์ '+o.orderId+' แล้ว');
+      render();
+    };
+  }
+
+  const restoreBtn = document.getElementById('restore-order-btn');
+  if(restoreBtn){
+    restoreBtn.onclick = async () => {
+      const o = State.currentOrder;
+      await setOrderCancelled(State.date, o, false);
+      toast('กู้คืนออเดอร์ '+o.orderId+' แล้ว');
+      render();
+    };
+  }
+
+  const input = document.getElementById('scan-input');
+  if(input){
+    input.focus();
+    input.onkeydown = (e) => {
+      if(e.key==='Enter'){
+        const code = input.value.trim();
+        input.value='';
+        if(code) handleScan(code);
+      }
+    };
+  }
+
+  const camToggle = document.getElementById('cam-toggle');
+  if(camToggle){
+    camToggle.onclick = async () => {
+      const btn = document.getElementById('cam-toggle');
+      if(State.camActive){
+        await stopCamera();
+        btn.textContent = '📷 เปิดกล้องสแกนบาร์โค้ด';
+        btn.disabled = false;
+      } else {
+        btn.disabled = true;
+        btn.textContent = 'กำลังเปิดกล้อง...';
+        const ok = await startCamera();
+        btn.disabled = false;
+        btn.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนบาร์โค้ด';
+      }
+    };
+  }
 }
 
 async function handleScan(code){
   const o = State.currentOrder;
+  if(orderStatus(o)==='cancelled'){
+    beep('error');
+    showFeedback('danger', '✕ ออเดอร์นี้ถูกยกเลิกแล้ว');
+    return;
+  }
   const idx = o.items.findIndex(it => it.code.toLowerCase() === code.toLowerCase());
   if(idx === -1){
     beep('error');
