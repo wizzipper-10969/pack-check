@@ -19,6 +19,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
 <style>
@@ -1269,6 +1270,7 @@ function renderStaffList(){
       </div>
       <button class="btn secondary" id="clear-date-btn" style="max-width:130px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>🗑 เคลียร์วันนี้</button>
       <button class="btn secondary" id="export-stock-btn" style="max-width:170px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>📤 Export สรุปสต็อก</button>
+      <button class="btn secondary" id="export-photos-btn" style="max-width:190px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>🖼️ Export พร้อมรูป (ZIP)</button>
     </div>
     <div class="stats-row">
       <div class="stat"><div class="num">${total}</div><div class="lbl">ออเดอร์ทั้งหมด</div></div>
@@ -1340,6 +1342,18 @@ function wireStaffList(){
   if(exportBtn){
     exportBtn.onclick = () => exportStockReport(State.date, State.orders);
   }
+  const exportPhotosBtn = document.getElementById('export-photos-btn');
+  if(exportPhotosBtn){
+    exportPhotosBtn.onclick = async () => {
+      const old = exportPhotosBtn.textContent;
+      exportPhotosBtn.disabled = true;
+      exportPhotosBtn.textContent = '⏳ กำลังสร้างไฟล์...';
+      try{ await exportStockReport(State.date, State.orders, true); }
+      catch(err){ console.error('export with photos failed', err); toast('Export พร้อมรูปไม่สำเร็จ ลองใหม่อีกครั้ง'); }
+      exportPhotosBtn.disabled = false;
+      exportPhotosBtn.textContent = old;
+    };
+  }
   const summaryToggle = document.getElementById('summary-toggle');
   if(summaryToggle){
     summaryToggle.onclick = () => {
@@ -1364,7 +1378,7 @@ function wireStaffList(){
   });
 }
 
-function exportStockReport(date, orders){
+async function exportStockReport(date, orders, withPhotos){
   if(!date || !orders || orders.length===0){ toast('ไม่มีออเดอร์ของวันนี้ให้สรุป'); return; }
 
   // cancelled orders never shipped, so they're excluded from every stock/packing total below —
@@ -1388,6 +1402,27 @@ function exportStockReport(date, orders){
   const codes = Object.keys(totals).sort((a,b) => a.localeCompare(b));
   if(codes.length===0){ toast('ยังไม่มีสินค้าที่สแกนแพ็คเลยในวันนี้'); return; }
 
+  // --- optional: gather the box (evidence) photos of this day's orders ---
+  const photoFiles = {}; // orderId -> { dataUrl, file }
+  if(withPhotos){
+    if(typeof JSZip === 'undefined'){ toast('โหลดตัวสร้างไฟล์ ZIP ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่'); return; }
+    toast('กำลังรวบรวมรูปกล่อง...');
+    await mapWithConcurrency(orders, 6, async o => {
+      const url = await getBoxPhotoForOrder(date, o.orderId);
+      if(url && String(url).indexOf(',') > 0) photoFiles[o.orderId] = { dataUrl: url, file: '' };
+    });
+    const usedNames = new Set();
+    orders.forEach(o => {
+      const ph = photoFiles[o.orderId];
+      if(!ph) return;
+      const base = String(o.orderId).replace(/[\\\/:*?"<>|\s]+/g, '_').slice(0, 80) || 'order';
+      let name = base + '.jpg', n = 2;
+      while(usedNames.has(name)){ name = base + '_' + (n++) + '.jpg'; }
+      usedNames.add(name);
+      ph.file = name;
+    });
+  }
+
   const doneCount = activeOrders.filter(o => orderStatus(o)==='done').length;
   const notDoneCount = activeOrders.length - doneCount;
 
@@ -1403,12 +1438,14 @@ function exportStockReport(date, orders){
 
   // --- who packed which order ---
   const byOrderData = [
-    ['Order ID', 'ลูกค้า', 'เลขพัสดุ', 'สถานะ', 'แพ็คแล้ว/ทั้งหมด (ชิ้น)', 'แพ็คโดย']
+    ['Order ID', 'ลูกค้า', 'เลขพัสดุ', 'สถานะ', 'แพ็คแล้ว/ทั้งหมด (ชิ้น)', 'แพ็คโดย'].concat(withPhotos ? ['ไฟล์รูปกล่อง (โฟลเดอร์ photos)'] : [])
   ];
   orders.forEach(o => {
     const prog = orderProgress(o);
     const status = o.cancelled ? 'ยกเลิก' : (orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค'));
-    byOrderData.push([o.orderId, o.customer||'-', o.tracking||'-', status, prog.scanned+'/'+prog.total, o.packedBy||'-']);
+    const row = [o.orderId, o.customer||'-', o.tracking||'-', status, prog.scanned+'/'+prog.total, o.packedBy||'-'];
+    if(withPhotos) row.push(photoFiles[o.orderId] ? photoFiles[o.orderId].file : 'ไม่มีรูป');
+    byOrderData.push(row);
   });
 
   // --- totals per staff member, from the scan activity log (falls back to the order's
@@ -1455,7 +1492,7 @@ function exportStockReport(date, orders){
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   ws['!cols'] = [{wch:16},{wch:50},{wch:20},{wch:24}];
   const wsByOrder = XLSX.utils.aoa_to_sheet(byOrderData);
-  wsByOrder['!cols'] = [{wch:22},{wch:22},{wch:20},{wch:14},{wch:18},{wch:16}];
+  wsByOrder['!cols'] = [{wch:22},{wch:22},{wch:20},{wch:14},{wch:18},{wch:16}].concat(withPhotos ? [{wch:32}] : []);
   const wsByStaff = XLSX.utils.aoa_to_sheet(byStaffData);
   wsByStaff['!cols'] = [{wch:18},{wch:18},{wch:22}];
   const wsItemDetail = XLSX.utils.aoa_to_sheet(itemDetailData);
@@ -1467,6 +1504,44 @@ function exportStockReport(date, orders){
   XLSX.utils.book_append_sheet(wb, wsByOrder, 'แพ็คโดย (แยกออเดอร์)');
   XLSX.utils.book_append_sheet(wb, wsItemDetail, 'รายการสินค้าในแต่ละออเดอร์');
   XLSX.utils.book_append_sheet(wb, wsByStaff, 'สรุปตามพนักงาน');
+  if(withPhotos){
+    const zip = new JSZip();
+    zip.file('สรุปสต็อกที่แพ็ค_'+date+'.xlsx', XLSX.write(wb, { bookType:'xlsx', type:'array' }));
+    let photoCount = 0;
+    orders.forEach(o => {
+      const ph = photoFiles[o.orderId];
+      if(!ph) return;
+      zip.file('photos/'+ph.file, ph.dataUrl.split(',')[1], { base64:true });
+      photoCount++;
+    });
+    const statusOf = o => {
+      const prog = orderProgress(o);
+      return o.cancelled ? 'ยกเลิก' : (orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค'));
+    };
+    const rowsHtml = orders.map(o => {
+      const ph = photoFiles[o.orderId];
+      const prog = orderProgress(o);
+      const img = ph
+        ? `<a href="photos/${encodeURI(ph.file)}" target="_blank"><img src="photos/${encodeURI(ph.file)}" loading="lazy"></a>`
+        : '<span class="none">ไม่มีรูป</span>';
+      return `<tr><td class="mono">${esc(o.orderId)}</td><td class="mono">${esc(o.tracking||'-')}</td><td>${esc(statusOf(o))}<br><small>${prog.scanned}/${prog.total} ชิ้น</small></td><td>${esc(o.packedBy||'-')}</td><td>${img}</td></tr>`;
+    }).join('');
+    const reportHtml = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>PackCheck รูปกล่อง ${esc(date)}</title>
+<style>body{font-family:system-ui,'Noto Sans Thai',sans-serif;margin:24px;color:#222}h1{font-size:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;vertical-align:top;text-align:left;font-size:14px}th{background:#f5f5f5}img{width:180px;border-radius:8px;display:block}.mono{font-family:ui-monospace,Consolas,monospace}.none{color:#c00}small{color:#666}tr{break-inside:avoid}</style></head><body>
+<h1>PackCheck — รูปกล่องวันที่ ${esc(date)}</h1>
+<p>ออเดอร์ทั้งหมด ${orders.length} · มีรูป ${photoCount} · ไม่มีรูป ${orders.length - photoCount}</p>
+<table><thead><tr><th>Order ID</th><th>เลขพัสดุ</th><th>สถานะ</th><th>แพ็คโดย</th><th>รูปกล่อง</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+    zip.file('photo_report.html', reportHtml);
+    const blob = await zip.generateAsync({ type:'blob', compression:'STORE' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'PackCheck_'+date+'.zip';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    toast('Export สำเร็จ — มีรูป '+photoCount+' จาก '+orders.length+' ออเดอร์');
+    return;
+  }
   XLSX.writeFile(wb, 'สรุปสต็อกที่แพ็ค_'+date+'.xlsx');
 
   toast(notDoneCount>0
