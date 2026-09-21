@@ -119,6 +119,16 @@
   .eo-row .eo-remove{flex:0 0 auto;background:none;border:1px solid var(--border);border-radius:10px;width:36px;height:36px;min-height:36px;font-size:15px;color:var(--danger,#c0392b);cursor:pointer;}
   .eo-add-row{background:none;border:1.5px dashed var(--border);border-radius:14px;color:var(--accent);font-family:var(--disp);font-weight:600;font-size:13px;text-transform:uppercase;padding:10px;width:100%;cursor:pointer;margin-bottom:14px;}
 
+  #box-photo-modal .modal-card{max-width:400px;}
+  .bp-preview{
+    width:100%;aspect-ratio:4/3;border-radius:16px;overflow:hidden;background:var(--surface2);
+    border:1.5px dashed var(--border);display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+  }
+  .bp-preview img{width:100%;height:100%;object-fit:cover;display:block;}
+  .bp-placeholder{color:var(--muted);font-size:13px;text-align:center;line-height:1.6;}
+  .bp-placeholder .ic{font-size:30px;display:block;margin-bottom:4px;}
+  .box-photo-thumb{width:100%;max-width:240px;border-radius:12px;margin-top:8px;display:block;border:1px solid rgba(255,255,255,.5);}
+
   #product-picker-modal{z-index:250;}
   #product-picker-modal .modal-card{max-width:480px;display:flex;flex-direction:column;max-height:85vh;}
   #pp-search{margin-bottom:10px;}
@@ -441,6 +451,19 @@
       </div>
     </div>
   </div>
+  <div id="box-photo-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">📸 ถ่ายรูปกล่องก่อนปิดออเดอร์</div>
+      <div class="modal-desc">ออเดอร์ <b id="bp-order-id" class="mono"></b> แพ็คครบแล้ว — ถ่ายรูปกล่องที่แพ็คเสร็จไว้เป็นหลักฐาน กันพลาดก่อนปิดออเดอร์นี้</div>
+      <div class="bp-preview" id="bp-preview"><div class="bp-placeholder"><span class="ic">📦</span>ยังไม่ได้ถ่ายรูป</div></div>
+      <input type="file" id="bp-file-input" accept="image/*" capture="environment" style="display:none">
+      <button class="btn secondary" id="bp-take-btn" style="margin-bottom:10px">📷 ถ่ายรูปกล่อง</button>
+      <div class="row">
+        <button class="btn secondary" id="bp-skip">ข้ามขั้นตอนนี้</button>
+        <button class="btn" id="bp-confirm" disabled>✅ ยืนยันและปิดออเดอร์</button>
+      </div>
+    </div>
+  </div>
   <div id="product-picker-modal" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-title">🔍 เลือกสินค้า</div>
@@ -624,6 +647,81 @@ function saveStaffName(){
 document.getElementById('staff-badge').onclick = openStaffModal;
 document.getElementById('staff-modal-save').onclick = saveStaffName;
 document.getElementById('staff-modal-skip').onclick = closeStaffModal;
+
+/* ============ BOX PHOTO (evidence shot before closing an order) ============ */
+// autoClose=true is the "just finished scanning the last item" flow, which also loops
+// the screen back to the label-scan list once the modal is done; autoClose=false is the
+// manual "📷 ถ่ายรูปกล่อง" button on an already-open order, which just re-renders in place
+function openBoxPhotoModal(order, autoClose){
+  State.pendingCloseOrder = order;
+  State.boxPhotoAutoClose = !!autoClose;
+  const existing = State.boxPhotoCache[State.date+':'+order.orderId] || null;
+  State.pendingBoxPhotoDataUrl = existing;
+  document.getElementById('bp-order-id').textContent = order.orderId;
+  document.getElementById('bp-preview').innerHTML = existing
+    ? `<img src="${existing}">`
+    : '<div class="bp-placeholder"><span class="ic">📦</span>ยังไม่ได้ถ่ายรูป</div>';
+  document.getElementById('bp-confirm').disabled = !existing;
+  document.getElementById('bp-take-btn').textContent = existing ? '📷 ถ่ายรูปใหม่' : '📷 ถ่ายรูปกล่อง';
+  document.getElementById('box-photo-modal').classList.add('show');
+}
+function closeBoxPhotoModal(){
+  document.getElementById('box-photo-modal').classList.remove('show');
+}
+async function afterBoxPhotoModalClose(){
+  const autoClose = State.boxPhotoAutoClose;
+  closeBoxPhotoModal();
+  State.pendingCloseOrder = null;
+  State.pendingBoxPhotoDataUrl = null;
+  if(autoClose){
+    await stopCamera();
+    State.staffSub = 'list';
+    main_loading();
+    await refreshStaffList();
+    render();
+    const orderInp = document.getElementById('order-scan-input');
+    if(orderInp) orderInp.focus();
+  } else {
+    render();
+  }
+}
+async function confirmBoxPhoto(){
+  const o = State.pendingCloseOrder;
+  if(!o){ await afterBoxPhotoModalClose(); return; }
+  if(State.pendingBoxPhotoDataUrl){
+    const btn = document.getElementById('bp-confirm');
+    btn.disabled = true;
+    btn.textContent = 'กำลังบันทึก...';
+    await sSetWithRetry(boxPhotoKey(State.date, o.orderId), State.pendingBoxPhotoDataUrl, true);
+    o.boxPhotoAt = Date.now();
+    o.boxPhotoBy = State.staffName || 'ไม่ระบุชื่อ';
+    await saveOrder(State.date, o);
+    State.boxPhotoCache[State.date+':'+o.orderId] = State.pendingBoxPhotoDataUrl;
+  }
+  await afterBoxPhotoModalClose();
+}
+document.getElementById('bp-take-btn').onclick = () => document.getElementById('bp-file-input').click();
+document.getElementById('bp-file-input').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  const preview = document.getElementById('bp-preview');
+  preview.innerHTML = '<div class="bp-placeholder">⏳ กำลังประมวลผลรูป...</div>';
+  try{
+    // 1000px on the long side / quality 0.62 — big enough to read the box & label
+    // clearly, but still a small, quick-to-sync JPEG (roughly 60–150 KB)
+    const dataUrl = await resizeImageFile(file, 1000, 0.62);
+    State.pendingBoxPhotoDataUrl = dataUrl;
+    preview.innerHTML = `<img src="${dataUrl}">`;
+    document.getElementById('bp-confirm').disabled = false;
+    document.getElementById('bp-take-btn').textContent = '📷 ถ่ายรูปใหม่';
+  }catch(err){
+    console.error('box photo resize failed', err);
+    preview.innerHTML = '<div class="bp-placeholder">⚠ ถ่ายรูปไม่สำเร็จ ลองใหม่อีกครั้ง</div>';
+  }
+};
+document.getElementById('bp-skip').onclick = afterBoxPhotoModalClose;
+document.getElementById('bp-confirm').onclick = confirmBoxPhoto;
 document.getElementById('eo-add-row').onclick = () => {
   if(!State.editOrderDraft) return;
   openProductPicker('new');
@@ -740,8 +838,11 @@ const State = {
   staffName: '', // current packer's name, persisted in localStorage
   lastScan: null, // {orderId, code, ts} — most recent scan action, for one-step undo
   editOrderDraft: null, // working copy of items while the "แก้ไขออเดอร์" modal is open
-  productPickerTarget: null // number (index into editOrderDraft) or 'new' — which row the product picker is filling
-
+  productPickerTarget: null, // number (index into editOrderDraft) or 'new' — which row the product picker is filling
+  boxPhotoCache: {}, // 'date:orderId' -> dataURL or null — the packed-box evidence photo
+  pendingCloseOrder: null, // order currently shown in the box-photo modal
+  pendingBoxPhotoDataUrl: null, // photo captured in the modal but not yet saved
+  boxPhotoAutoClose: false // whether confirming/skipping the modal should also navigate back to the order list
 
 };
 
@@ -868,6 +969,18 @@ async function getPhotoForCode(code){
   const v = await sGetWithRetry(photoKey(code), true);
   State.photoCache[code] = v || null;
   return State.photoCache[code];
+}
+
+// box (evidence) photo — stored as its own doc, separate from the order doc and from
+// per-product photos, so a normal order read/write never has to carry this larger image
+function boxPhotoKey(date, orderId){ return 'boxphoto:'+date+':'+sanitizeKeyPart(orderId); }
+
+async function getBoxPhotoForOrder(date, orderId){
+  const ck = date+':'+orderId;
+  if(ck in State.boxPhotoCache) return State.boxPhotoCache[ck];
+  const v = await sGetWithRetry(boxPhotoKey(date, orderId), true);
+  State.boxPhotoCache[ck] = v || null;
+  return State.boxPhotoCache[ck];
 }
 
 function resizeImageFile(file, maxSize, quality){
@@ -1373,6 +1486,9 @@ async function openOrder(orderId){
       const v = await sGetWithRetry('photo:'+sanitizeKeyPart(it.code), true);
       State.photoCache[it.code] = v || null;
     });
+    if(State.currentOrder.boxPhotoAt){
+      await getBoxPhotoForOrder(State.date, orderId);
+    }
   }
   render();
 }
@@ -1402,9 +1518,12 @@ function renderDetail(){
     </div>`;
   }).join('');
 
+  const boxPhoto = State.boxPhotoCache[State.date+':'+o.orderId] || null;
   const doneBanner = st==='done' ? `<div class="banner-done">
       <div class="big">✅ แพ็คครบถ้วนแล้ว</div>
       <div class="time">อัปเดตล่าสุด ${o.updatedAt ? new Date(o.updatedAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+      ${boxPhoto ? `<img class="box-photo-thumb" src="${boxPhoto}">` : `<div class="muted" style="font-size:12px;margin-top:6px">ยังไม่มีรูปกล่อง</div>`}
+      <button class="btn secondary" id="box-photo-btn" style="margin-top:8px">${boxPhoto ? '📷 ถ่ายรูปกล่องใหม่' : '📷 ถ่ายรูปกล่อง'}</button>
     </div>` : '';
 
   const cancelledBanner = st==='cancelled' ? `<div class="banner-cancelled">
@@ -1465,15 +1584,25 @@ function wireDetail(){
 
   document.querySelectorAll('[data-adj]').forEach(btn => {
     btn.onclick = async () => {
-      if(orderStatus(State.currentOrder)==='cancelled') return;
+      const o = State.currentOrder;
+      if(orderStatus(o)==='cancelled') return;
       const idx = parseInt(btn.getAttribute('data-idx'));
       const delta = parseInt(btn.getAttribute('data-adj'));
-      const it = State.currentOrder.items[idx];
+      const it = o.items[idx];
+      const wasDone = orderStatus(o)==='done';
       it.qtyScanned = Math.max(0, it.qtyScanned + delta);
-      await saveOrder(State.date, State.currentOrder);
+      await saveOrder(State.date, o);
       render();
+      // manually adjusting counts (instead of scanning) can also complete an order —
+      // catch that path too so the box-photo step can't be skipped just by using +/-
+      if(!wasDone && orderStatus(o)==='done' && !o.boxPhotoAt){
+        setTimeout(() => openBoxPhotoModal(o, false), 200);
+      }
     };
   });
+
+  const boxPhotoBtn = document.getElementById('box-photo-btn');
+  if(boxPhotoBtn) boxPhotoBtn.onclick = () => openBoxPhotoModal(State.currentOrder, false);
 
   const undoBtn = document.getElementById('undo-scan-btn');
   if(undoBtn) undoBtn.onclick = undoLastScan;
@@ -1566,19 +1695,12 @@ async function handleScan(code){
   beep(allDone ? 'done' : 'success');
 
   if(allDone){
-    showFeedback('success', '✅ แพ็คออเดอร์ '+o.orderId+' ครบแล้ว! ไปสแกนใบปะหน้าถัดไปได้เลย');
+    showFeedback('success', '✅ แพ็คออเดอร์ '+o.orderId+' ครบแล้ว! ถ่ายรูปกล่องเพื่อปิดออเดอร์');
     speakPackDone();
     render();
-    // brief pause so staff sees the "done" state, then loop back to the label-scan screen automatically
-    setTimeout(async () => {
-      await stopCamera();
-      State.staffSub = 'list';
-      main_loading();
-      await refreshStaffList();
-      render();
-      const orderInp = document.getElementById('order-scan-input');
-      if(orderInp) orderInp.focus();
-    }, 1300);
+    // brief pause so staff sees the "done" state, then prompt for the box evidence photo —
+    // the loop back to the label-scan screen happens once that modal is confirmed/skipped
+    setTimeout(() => { openBoxPhotoModal(o, true); }, 900);
     return;
   }
 
