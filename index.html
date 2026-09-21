@@ -1411,6 +1411,13 @@ async function exportStockReport(date, orders, withPhotos){
       const url = await getBoxPhotoForOrder(date, o.orderId);
       if(url && String(url).indexOf(',') > 0) photoFiles[o.orderId] = { dataUrl: url, file: '' };
     });
+    // product thumbnails (already cached in most cases) so the report shows what was packed
+    const allCodes = new Set();
+    orders.forEach(o => o.items.forEach(it => { if(it.code) allCodes.add(it.code); }));
+    await mapWithConcurrency([...allCodes].filter(c => !(c in State.photoCache)), 6, async c => {
+      const v = await sGetWithRetry(photoKey(c), true);
+      State.photoCache[c] = v || null;
+    });
     const usedNames = new Set();
     orders.forEach(o => {
       const ph = photoFiles[o.orderId];
@@ -1518,19 +1525,68 @@ async function exportStockReport(date, orders, withPhotos){
       const prog = orderProgress(o);
       return o.cancelled ? 'ยกเลิก' : (orderStatus(o)==='done' ? 'ครบแล้ว' : (prog.scanned>0 ? 'แพ็คบางส่วน' : 'ยังไม่แพ็ค'));
     };
+    // product thumbnails go in products/ (one file per SKU, shared by every order)
+    const prodFile = code => {
+      const d = State.photoCache[code];
+      return (d && String(d).indexOf(',') > 0) ? sanitizeKeyPart(code) + '.jpg' : '';
+    };
+    const usedProd = new Set();
+    Object.keys(totals).concat(orders.reduce((a,o) => a.concat(o.items.map(it => it.code)), [])).forEach(code => {
+      const f = code && prodFile(code);
+      if(!f || usedProd.has(code)) return;
+      usedProd.add(code);
+      zip.file('products/'+f, State.photoCache[code].split(',')[1], { base64:true });
+    });
+    const thumbHtml = code => {
+      const f = prodFile(code);
+      return f ? `<img class="pt" src="products/${encodeURI(f)}">` : '<div class="pt ph">🏷️</div>';
+    };
+    const qtyCls = (sc, req) => (sc>=req && req>0) ? 'ok' : (sc>0 ? 'part' : 'no');
+
+    // day summary: what physically left the shelf today (same numbers as the stock sheet)
+    const summaryRows = codes.map(c => `<tr><td class="c-thumb">${thumbHtml(c)}</td><td>${esc(totals[c].name)}<br><small class="mono">${esc(c)}</small></td><td class="num">${totals[c].qtyPacked}</td><td class="num">${totals[c].orderCount}</td></tr>`).join('');
+    const totalPieces = codes.reduce((sum, c) => sum + totals[c].qtyPacked, 0);
+
     const rowsHtml = orders.map(o => {
       const ph = photoFiles[o.orderId];
       const prog = orderProgress(o);
-      const img = ph
+      const shot = ph
         ? `<a href="photos/${encodeURI(ph.file)}" target="_blank"><img src="photos/${encodeURI(ph.file)}" loading="lazy"></a>`
         : '<span class="none">ไม่มีรูป</span>';
-      return `<tr><td class="mono">${esc(o.orderId)}</td><td class="mono">${esc(o.tracking||'-')}</td><td>${esc(statusOf(o))}<br><small>${prog.scanned}/${prog.total} ชิ้น</small></td><td>${esc(o.packedBy||'-')}</td><td>${img}</td></tr>`;
+      const itemsHtml = o.items.map(it => {
+        const req = it.qtyRequired||0, sc = it.qtyScanned||0;
+        return `<div class="it">${thumbHtml(it.code)}<div class="in"><div>${esc(it.name||it.code)}</div><small class="mono">${esc(it.code)}</small></div><div class="q ${qtyCls(sc, req)}">${sc}/${req}</div></div>`;
+      }).join('');
+      return `<tr><td><div class="mono b">${esc(o.orderId)}</div><div class="mono sm">${esc(o.tracking||'-')}</div></td><td>${esc(statusOf(o))}<br><small>${prog.scanned}/${prog.total} ชิ้น · แพ็คโดย ${esc(o.packedBy||'-')}</small></td><td>${itemsHtml}</td><td class="shot">${shot}</td></tr>`;
     }).join('');
-    const reportHtml = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>PackCheck รูปกล่อง ${esc(date)}</title>
-<style>body{font-family:system-ui,'Noto Sans Thai',sans-serif;margin:24px;color:#222}h1{font-size:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;vertical-align:top;text-align:left;font-size:14px}th{background:#f5f5f5}img{width:180px;border-radius:8px;display:block}.mono{font-family:ui-monospace,Consolas,monospace}.none{color:#c00}small{color:#666}tr{break-inside:avoid}</style></head><body>
-<h1>PackCheck — รูปกล่องวันที่ ${esc(date)}</h1>
-<p>ออเดอร์ทั้งหมด ${orders.length} · มีรูป ${photoCount} · ไม่มีรูป ${orders.length - photoCount}</p>
-<table><thead><tr><th>Order ID</th><th>เลขพัสดุ</th><th>สถานะ</th><th>แพ็คโดย</th><th>รูปกล่อง</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+    const reportHtml = `<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PackCheck รูปกล่อง ${esc(date)}</title>
+<style>
+body{font-family:system-ui,'Noto Sans Thai',sans-serif;margin:24px;color:#222}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:24px 0 8px}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th,td{border:1px solid #ddd;padding:8px;vertical-align:top;text-align:left;font-size:14px;word-wrap:break-word}
+th{background:#f5f5f5}
+.mono{font-family:ui-monospace,Consolas,monospace}.b{font-weight:700}.sm{font-size:12px;color:#555}
+.none{color:#c00}small{color:#666}
+.shot img{width:180px;border-radius:8px;display:block}
+.pt{width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #e3e3e3;flex:none}
+.ph{display:flex;align-items:center;justify-content:center;background:#f5f5f5}
+.it{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dashed #eee}.it:last-child{border-bottom:0}
+.in{flex:1;min-width:0}.q{font-weight:700;white-space:nowrap}.q.ok{color:#15803d}.q.part{color:#b45309}.q.no{color:#c00}
+.num{text-align:right;font-weight:700}
+.c-thumb{width:64px}
+.sum{max-width:720px}
+tr{break-inside:avoid}
+@media print{body{margin:8px}}
+</style></head><body>
+<h1>PackCheck — รายงานแพ็คของวันที่ ${esc(date)}</h1>
+<p>ออเดอร์ทั้งหมด ${orders.length} · มีรูปกล่อง ${photoCount} · ไม่มีรูป ${orders.length - photoCount} · สินค้าที่แพ็คไปรวม ${totalPieces} ชิ้น</p>
+<h2>สรุปสินค้าที่แพ็คไปทั้งวัน (ไม่รวมออเดอร์ที่ยกเลิก)</h2>
+<table class="sum"><colgroup><col style="width:64px"><col><col style="width:110px"><col style="width:130px"></colgroup>
+<thead><tr><th></th><th>สินค้า</th><th>แพ็คไป (ชิ้น)</th><th>จำนวนออเดอร์</th></tr></thead><tbody>${summaryRows}</tbody></table>
+<h2>รายละเอียดแยกตามออเดอร์</h2>
+<table><colgroup><col style="width:22%"><col style="width:16%"><col><col style="width:210px"></colgroup>
+<thead><tr><th>Order / เลขพัสดุ</th><th>สถานะ</th><th>สินค้าในกล่อง (แพ็คแล้ว/ต้องแพ็ค)</th><th>รูปกล่อง</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
     zip.file('photo_report.html', reportHtml);
     const blob = await zip.generateAsync({ type:'blob', compression:'STORE' });
     const a = document.createElement('a');
