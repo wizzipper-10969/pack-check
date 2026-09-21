@@ -2414,8 +2414,14 @@ async function undoLastVerifyScan(){
 
 /* ============ CAMERA SCANNER ============ */
 let scanCooldown = false;
+// Same-barcode guard: once a code has been counted, the camera must lose sight of it
+// (no reads for SCAN_CLEAR_MS) before that same code can count again. Without this, leaving
+// the barcode in front of the camera re-counted it every ~1s (1/5 -> 2/5 -> ... 5/5).
+const SCAN_CLEAR_MS = 1500;
+let scanGuard = { code: null, lastSeen: 0 };
 async function startCamera(onDecode){
   onDecode = onDecode || handleScan;
+  scanGuard = { code: null, lastSeen: 0 };
   const wrap = document.getElementById('cam-wrap');
 
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -2468,11 +2474,20 @@ async function startCamera(onDecode){
         },
         (decodedText) => {
           if(scanCooldown) return;
+          const text = decodedText.trim();
+          const now = Date.now();
+          if(scanGuard.code === text){
+            const stillInView = (now - scanGuard.lastSeen) < SCAN_CLEAR_MS;
+            scanGuard.lastSeen = now;
+            if(stillInView) return; // same barcode still in front of the camera — not a new scan
+          }
+          scanGuard = { code: text, lastSeen: now };
           scanCooldown = true;
-          onDecode(decodedText.trim());
+          onDecode(text);
           if(State.html5Qr){ try{ State.html5Qr.pause(true); }catch(e){} }
           setTimeout(() => {
             scanCooldown = false;
+            scanGuard.lastSeen = Date.now(); // measure "barcode left the frame" from when scanning resumes
             if(State.html5Qr && State.camActive){ try{ State.html5Qr.resume(); }catch(e){} }
           }, 1100);
         },
