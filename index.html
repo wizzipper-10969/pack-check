@@ -255,6 +255,8 @@
     padding:14px 16px;margin-bottom:16px;box-shadow:var(--glass-shadow);
   }
   .scan-input-row{display:flex;gap:8px;margin-bottom:8px;}
+  .kbd-toggle{flex:none;background:rgba(255,255,255,.7);border:1px dashed rgba(0,0,0,.25);border-radius:12px;padding:6px 12px;font-size:13px;font-family:inherit;margin:0 0 8px;cursor:pointer;color:inherit;}
+  .scan-input-row .kbd-toggle{margin:0;}
   .scan-input-row input{margin-bottom:0;font-family:var(--mono);}
 
   #cam-wrap{display:none;margin-bottom:10px;border-radius:14px;overflow:hidden;border:2px solid var(--accent);position:relative;}
@@ -811,6 +813,29 @@ function showFeedback(kind, text){
 }
 
 /* ============ STATE ============ */
+/* ---- phones/tablets: keep the on-screen keyboard from popping up on scan inputs ----
+   The scan boxes stay focused (so a Bluetooth/USB scanner still types into them) but with
+   inputmode="none" the virtual keyboard is not shown. A small ⌨️ button lets staff type a code
+   by hand when they really want the keyboard; it hides again as soon as the box loses focus. */
+const IS_TOUCH = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const SCAN_IM = IS_TOUCH ? 'none' : 'text';
+function kbToggleBtn(inputId){
+  return IS_TOUCH ? `<button type="button" class="kbd-toggle" data-for="${inputId}">⌨️ พิมพ์รหัสเอง</button>` : '';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('.kbd-toggle');
+  if(!b) return;
+  const inp = document.getElementById(b.dataset.for);
+  if(!inp) return;
+  inp.setAttribute('inputmode', 'text');
+  inp.blur();
+  inp.focus();
+});
+document.addEventListener('focusout', e => {
+  const t = e.target;
+  if(IS_TOUCH && t && t.dataset && t.dataset.scanin === '1') t.setAttribute('inputmode', 'none');
+});
+
 const State = {
   view: 'staff', // staff | admin
   staffSub: 'list', // list | detail
@@ -1260,7 +1285,8 @@ function renderStaffList(){
     <div class="order-scan-card">
       <div class="osc-title">📦 สแกนใบปะหน้าเพื่อเปิดออเดอร์</div>
       <div id="cam-wrap"><div id="reader"></div><div class="scan-line"></div></div>
-      <input type="text" id="order-scan-input" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      <input type="text" id="order-scan-input" data-scanin="1" inputmode="${SCAN_IM}" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      ${kbToggleBtn('order-scan-input')}
       <button class="btn" id="order-cam-toggle">📷 เปิดกล้องสแกนใบปะหน้า</button>
     </div>
     <div class="row" style="align-items:flex-end">
@@ -1676,7 +1702,8 @@ function renderDetail(){
         <div class="scan-line"></div>
       </div>
       <div class="scan-input-row">
-        <input type="text" id="scan-input" placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัสสินค้าแล้วกด Enter" autocomplete="off" autocapitalize="off">
+        <input type="text" id="scan-input" data-scanin="1" inputmode="${SCAN_IM}" placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัสสินค้าแล้วกด Enter" autocomplete="off" autocapitalize="off">
+        ${kbToggleBtn('scan-input')}
       </div>
       <div class="row" style="margin-top:8px">
         <button class="btn" id="cam-toggle">📷 เปิดกล้องสแกนบาร์โค้ด</button>
@@ -2084,7 +2111,8 @@ function renderVerifyList(){
     <div class="order-scan-card">
       <div class="osc-title">🔎 สแกนใบปะหน้าเพื่อตรวจสอบก่อนส่ง</div>
       <div id="cam-wrap"><div id="reader"></div><div class="scan-line"></div></div>
-      <input type="text" id="verify-scan-input" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      <input type="text" id="verify-scan-input" data-scanin="1" inputmode="${SCAN_IM}" placeholder="ยิงบาร์โค้ดใบปะหน้า หรือพิมพ์เลขพัสดุ/Order ID แล้วกด Enter" autocomplete="off">
+      ${kbToggleBtn('verify-scan-input')}
       <button class="btn" id="verify-cam-toggle">📷 เปิดกล้องสแกนใบปะหน้า</button>
     </div>
     <div class="row" style="align-items:flex-end">
@@ -2286,7 +2314,8 @@ function renderVerifyDetail(){
         <div class="scan-line"></div>
       </div>
       <div class="scan-input-row">
-        <input type="text" id="scan-input" placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัสสินค้าแล้วกด Enter" autocomplete="off" autocapitalize="off">
+        <input type="text" id="scan-input" data-scanin="1" inputmode="${SCAN_IM}" placeholder="ยิงบาร์โค้ด หรือพิมพ์รหัสสินค้าแล้วกด Enter" autocomplete="off" autocapitalize="off">
+        ${kbToggleBtn('scan-input')}
       </div>
       <button class="btn" id="cam-toggle">📷 เปิดกล้องสแกนบาร์โค้ด</button>
     </div>
