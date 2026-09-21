@@ -1486,8 +1486,11 @@ async function openOrder(orderId){
       const v = await sGetWithRetry('photo:'+sanitizeKeyPart(it.code), true);
       State.photoCache[it.code] = v || null;
     });
-    if(State.currentOrder.boxPhotoAt){
-      await getBoxPhotoForOrder(State.date, orderId);
+    // always look for the saved box photo (it lives in its own doc, so it survives a
+    // re-import even when the order doc lost its boxPhotoAt flag)
+    const savedBoxPhoto = await getBoxPhotoForOrder(State.date, orderId);
+    if(savedBoxPhoto && !State.currentOrder.boxPhotoAt){
+      State.currentOrder.boxPhotoAt = Date.now();
     }
   }
   render();
@@ -2802,6 +2805,7 @@ function wireAdmin(){
         });
         if(prev.packedBy) order.packedBy = prev.packedBy;
         if(Array.isArray(prev.activityLog)) order.activityLog = prev.activityLog;
+        if(prev.boxPhotoAt){ order.boxPhotoAt = prev.boxPhotoAt; order.boxPhotoBy = prev.boxPhotoBy; }
         if(anyRestored) restoredCount++;
       }
       order.status = 'pending';
