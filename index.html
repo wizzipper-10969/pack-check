@@ -2665,7 +2665,14 @@ function wireAdmin(){
       reader.onload = (ev) => {
         try{
           const data = new Uint8Array(ev.target.result);
-          const wb = XLSX.read(data, {type:'array'});
+          // raw:true: for CSV files, SheetJS auto-detects numeric-looking cells (like an
+          // 18-digit Order ID) and converts them to JS numbers, which silently lose precision
+          // past ~15-16 digits (e.g. 586198309175854607 becomes 586198309175854600). That
+          // rounded value then no longer matches the same order's ID from a previous .xlsx
+          // upload (where the cell was already text), so the order looks brand new instead of
+          // updating the packed one. raw:true keeps every CSV cell as the original text — a
+          // no-op for real .xlsx files, since those already carry their own cell types.
+          const wb = XLSX.read(data, {type:'array', raw:true});
           const sheet = wb.Sheets[wb.SheetNames[0]];
           fillMergedCells(sheet);
           const json = XLSX.utils.sheet_to_json(sheet, {defval:''});
@@ -3548,7 +3555,7 @@ function wireSets(){
 
 async function importSetsFromFile(file){
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
+  const wb = XLSX.read(new Uint8Array(buf), {type:'array', raw:true}); // see raw:true note above
   const sheet = wb.Sheets[wb.SheetNames[0]];
   fillMergedCells(sheet);
   // read as raw rows (not header-keyed) since the native TikTok product export re-uses
