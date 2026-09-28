@@ -886,6 +886,13 @@ function speakText(text){
   }catch(e){}
 }
 function speakPackDone(){ speakText('แพคครบแล้ว'); }
+// จำนวนชิ้นที่ยังต้องแพ็คทั้งออเดอร์ (รวมทุกรายการ)
+function orderRemainingPieces(o){
+  return o.items.reduce((sum, it) => sum + Math.max(0, (it.qtyRequired||0) - (it.qtyScanned||0)), 0);
+}
+function orderTotalPieces(o){
+  return o.items.reduce((sum, it) => sum + (it.qtyRequired||0), 0);
+}
 function speakVerifyDone(){ speakText('ตรวจสอบครบแล้ว พร้อมส่ง'); }
 
 function showFeedback(kind, text){
@@ -1739,8 +1746,10 @@ async function openOrder(orderId){
   render();
   // อ่านออกเสียงจำนวนชิ้นที่ยังต้องแพ็คของออเดอร์นี้ เช่น "5 ชิ้น"
   if(State.currentOrder && orderStatus(State.currentOrder) !== 'cancelled'){
-    const remaining = State.currentOrder.items.reduce((sum, it) => sum + Math.max(0, (it.qtyRequired||0) - (it.qtyScanned||0)), 0);
-    if(remaining > 0) speakText('เหลือ ' + remaining + ' ชิ้น');
+    const remaining = orderRemainingPieces(State.currentOrder);
+    const total = orderTotalPieces(State.currentOrder);
+    // ออเดอร์ใหม่ยังไม่เริ่มแพ็ค: "มี N ชิ้น" — เคยแพ็คไปบางส่วนแล้ว: "เหลือ N ชิ้น"
+    if(remaining > 0) speakText((remaining === total ? 'มี ' : 'เหลือ ') + remaining + ' ชิ้น');
   }
 }
 
@@ -1957,6 +1966,7 @@ async function handleScan(code){
   }
 
   showFeedback('success', '✓ '+it.name+' ('+it.qtyScanned+'/'+it.qtyRequired+')');
+  speakText('เหลือ ' + orderRemainingPieces(o) + ' ชิ้น');
   render();
   // re-focus input after re-render if camera not active
   setTimeout(() => { const inp = document.getElementById('scan-input'); if(inp) inp.focus(); }, 50);
@@ -2973,10 +2983,11 @@ function wireAdmin(){
           if(doc && Array.isArray(doc.items)){
             doc.items.forEach(pi => {
               const ex = prev.items.find(m => m.code === pi.code);
-              if(ex){ ex.qtyScanned += (pi.qtyScanned||0); }
-              else { prev.items.push({ code: pi.code, qtyScanned: pi.qtyScanned||0 }); }
+              if(ex){ ex.qtyScanned += (pi.qtyScanned||0); ex.qtyVerified = (ex.qtyVerified||0) + (pi.qtyVerified||0); }
+              else { prev.items.push({ code: pi.code, qtyScanned: pi.qtyScanned||0, qtyVerified: pi.qtyVerified||0 }); }
             });
             if(doc.packedBy) prev.packedBy = doc.packedBy;
+            if(doc.verifiedAt && (!prev.verifiedAt || doc.verifiedAt > prev.verifiedAt)){ prev.verifiedAt = doc.verifiedAt; prev.verifiedBy = doc.verifiedBy; }
             if(Array.isArray(doc.activityLog)) prev.activityLog = prev.activityLog.concat(doc.activityLog);
           }
         });
@@ -3070,7 +3081,7 @@ function wireAdmin(){
       // manually edited — keep the edited item list itself, not just its scanned
       // progress, so the swap isn't reverted by this re-upload
       if(prev && prev.itemsManuallyEdited && Array.isArray(prev.items) && !order.originalOrderIds){
-        order.items = prev.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned }));
+        order.items = prev.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned, qtyVerified: it.qtyVerified || 0 }));
         order.itemsManuallyEdited = true;
       }
       if(prev && Array.isArray(prev.items)){
@@ -3081,7 +3092,16 @@ function wireAdmin(){
             it.qtyScanned = Math.min(prevItem.qtyScanned, it.qtyRequired);
             anyRestored = true;
           }
+          // คืนสถานะ "ตรวจก่อนส่ง" ด้วย (จำนวนที่ตรวจแล้วต่อรายการ)
+          if(prevItem && prevItem.qtyVerified){
+            it.qtyVerified = Math.min(prevItem.qtyVerified, it.qtyRequired);
+            anyRestored = true;
+          }
         });
+        if(prev.verifiedAt && verifyStatusOf(order) === 'verified'){
+          order.verifiedAt = prev.verifiedAt;
+          order.verifiedBy = prev.verifiedBy || null;
+        }
         if(prev.packedBy) order.packedBy = prev.packedBy;
         if(Array.isArray(prev.activityLog)) order.activityLog = prev.activityLog;
         if(prev.boxPhotoAt){ order.boxPhotoAt = prev.boxPhotoAt; order.boxPhotoBy = prev.boxPhotoBy; }
