@@ -1098,6 +1098,27 @@ async function getBoxPhotoForOrder(date, orderId){
   return State.boxPhotoCache[ck];
 }
 
+/* โหลดรูปกล่องล่วงหน้าเบื้องหลัง (ทีละรูป) เฉพาะช่วงที่ไม่ได้กำลังสแกน
+   เพื่อให้ตอนสแกนใบปะหน้ารูปขึ้นทันทีจากแคช และไม่แย่งการเชื่อมต่อกับการบันทึกของการสแกน */
+let boxPrefetchToken = 0;
+let lastVerifyScanAt = 0;
+async function prefetchBoxPhotos(){
+  const token = ++boxPrefetchToken;
+  const date = State.date;
+  const ids = (State.verifyOrders || [])
+    .filter(o => orderStatus(o)==='done' && verifyStatusOf(o)!=='verified' && !((date+':'+o.orderId) in State.boxPhotoCache))
+    .map(o => o.orderId);
+  for(const id of ids){
+    // หยุดถ้าเปลี่ยนหน้า/เปลี่ยนวัน/มีรอบใหม่เริ่มแล้ว
+    while(Date.now() - lastVerifyScanAt < 2500){
+      if(token !== boxPrefetchToken || State.view !== 'verify') return;
+      await sleep(500);
+    }
+    if(token !== boxPrefetchToken || State.view !== 'verify' || State.date !== date) return;
+    try{ await getBoxPhotoForOrder(date, id); }catch(e){}
+  }
+}
+
 function resizeImageFile(file, maxSize, quality){
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2164,6 +2185,7 @@ async function refreshVerifyList(){
     if(State.dates.length){ State.date = State.dates[0]; }
   }
   State.verifyOrders = State.date ? await loadOrdersForDate(State.date) : [];
+  prefetchBoxPhotos(); // เบื้องหลัง ไม่ต้องรอ
 }
 
 function renderVerifyList(){
@@ -2308,14 +2330,22 @@ function showVerifyPopup(order, kind){
   `;
   // รูปกล่องตอนแพ็คเสร็จ (พร้อมของ) — โหลดแล้วค่อยแสดงเหนือรายการ
   const orderIdAtOpen = order.orderId;
-  getBoxPhotoForOrder(State.date, order.orderId).then(photo => {
+  el.dataset.oid = order.orderId;
+  const fillPhoto = (photo) => {
     const slot = document.getElementById('vp-photo-slot');
     if(!slot || el.dataset.oid !== orderIdAtOpen) return;
     slot.innerHTML = photo
       ? `<img class="vp-photo" src="${photo}" alt="รูปตอนแพ็คเสร็จ">`
       : `<div class="muted vp-nophoto">📷 ไม่มีรูปกล่องตอนแพ็ค</div>`;
-  }).catch(() => {});
-  el.dataset.oid = order.orderId;
+  };
+  const cacheKey = State.date+':'+order.orderId;
+  if(cacheKey in State.boxPhotoCache){
+    fillPhoto(State.boxPhotoCache[cacheKey]); // มีในแคชแล้ว: ขึ้นทันที
+  } else {
+    const slot0 = document.getElementById('vp-photo-slot');
+    if(slot0) slot0.innerHTML = '<div class="muted vp-nophoto">📷 กำลังโหลดรูป...</div>';
+    getBoxPhotoForOrder(State.date, order.orderId).then(fillPhoto).catch(() => {});
+  }
   el.classList.toggle('warn', kind==='warn');
   el.classList.add('show');
   el.onclick = () => {
@@ -2330,6 +2360,7 @@ function showVerifyPopup(order, kind){
 async function handleVerifyLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
+  lastVerifyScanAt = Date.now();
   let match = State.verifyOrders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
   if(!match){
     match = State.verifyOrders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
