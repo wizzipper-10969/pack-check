@@ -570,6 +570,50 @@ async function sDelete(key){
   try{ await rawDelete(key); }catch(e){ console.error('delete failed', key, e); }
 }
 
+/* ---- Batched writes/deletes: up to 400 docs per network round-trip (Firestore limit is 500) ---- */
+async function batchCommitWithRetry(buildFn, maxRetries){
+  maxRetries = maxRetries || 4;
+  let attempt = 0;
+  while(true){
+    try{
+      const batch = db.batch();
+      buildFn(batch);
+      await batch.commit();
+      return true;
+    }catch(e){
+      attempt++;
+      if(attempt > maxRetries){ console.error('batch commit gave up', e); throw e; }
+      await sleep(400 * attempt);
+    }
+  }
+}
+// entries: [{key, value}] — writes all of them in as few round-trips as possible
+async function sBatchSet(entries, onProgress){
+  if(!backendReady) throw new Error('backend not configured');
+  const CHUNK = 400;
+  for(let i=0; i<entries.length; i+=CHUNK){
+    const part = entries.slice(i, i+CHUNK);
+    await batchCommitWithRetry(batch => {
+      const now = Date.now();
+      part.forEach(en => {
+        batch.set(db.collection('packcheck').doc(sanitizeDocId(en.key)), { value: en.value, updatedAt: now });
+      });
+    });
+    if(onProgress) onProgress(Math.min(i+CHUNK, entries.length), entries.length);
+  }
+}
+// keys: [string] — deletes all of them in as few round-trips as possible
+async function sBatchDelete(keys){
+  if(!backendReady || !keys.length) return;
+  const CHUNK = 400;
+  for(let i=0; i<keys.length; i+=CHUNK){
+    const part = keys.slice(i, i+CHUNK);
+    await batchCommitWithRetry(batch => {
+      part.forEach(k => batch.delete(db.collection('packcheck').doc(sanitizeDocId(k))));
+    });
+  }
+}
+
 /* ============ UTIL ============ */
 function todayStr(){
   const d = new Date();
@@ -897,10 +941,7 @@ async function removeDateFromIndex(date){
 }
 async function clearOrdersForDate(date){
   const keys = await sList('order:'+date+':', true);
-  for(const k of keys){
-    await sDelete(k);
-    await sleep(100);
-  }
+  await sBatchDelete(keys);
   await removeDateFromIndex(date);
 }
 
@@ -2950,22 +2991,18 @@ function wireAdmin(){
 
     if(mergeMode==='replace'){
       const existingKeys = await sList('order:'+date+':', true);
-      for(const k of existingKeys){
-        await sDelete(k);
-        await sleep(120);
-      }
+      await sBatchDelete(existingKeys);
     } else {
       // remove any old doc now fully superseded by this upload (an old combined doc
       // whose grouping changed, or an old individual doc a new merge absorbed) so it
       // doesn't sit alongside the new doc as a stale duplicate entry
-      for(const k of keysToDelete){
-        if(finalOrderIds.some(id => orderKey(date, id) === k)) continue; // about to rewrite this exact key anyway
-        await sDelete(k);
-        await sleep(80);
-      }
+      const finalKeySet = new Set(finalOrderIds.map(id => orderKey(date, id)));
+      const staleToDelete = [...keysToDelete].filter(k => !finalKeySet.has(k)); // skip keys about to be rewritten anyway
+      await sBatchDelete(staleToDelete);
     }
 
     let doneCount = 0;
+    const writeEntries = [];
     for(const orderId of finalOrderIds){
       const order = grouped[orderId];
       const prev = existingByOrderId[orderId];
@@ -2992,11 +3029,11 @@ function wireAdmin(){
       }
       order.status = 'pending';
       order.updatedAt = Date.now();
-      await sSetWithRetry(orderKey(date, orderId), JSON.stringify(order), true);
-      doneCount++;
-      btn.textContent = 'กำลังนำเข้า... ('+doneCount+'/'+finalOrderIds.length+')';
-      await sleep(150);
+      writeEntries.push({ key: orderKey(date, orderId), value: JSON.stringify(order) });
     }
+    await sBatchSet(writeEntries, (done, total) => {
+      btn.textContent = 'กำลังนำเข้า... ('+done+'/'+total+')';
+    });
     await addDateToIndex(date);
 
     toast('นำเข้าสำเร็จ '+finalOrderIds.length+' ออเดอร์'
@@ -3634,11 +3671,8 @@ async function importSetsFromFile(file){
   if(defs.length===0){ toast('ไม่พบรายการเซทที่ถูกต้องในไฟล์ ตรวจสอบว่ากรอกตามเทมเพลต'); return; }
 
   let done = 0;
-  for(const def of defs){
-    await sSetWithRetry(setKey(def.matchBy, def.matchValue), JSON.stringify(def), true);
-    done++;
-    await sleep(150);
-  }
+  await sBatchSet(defs.map(def => ({ key: setKey(def.matchBy, def.matchValue), value: JSON.stringify(def) })));
+  done = defs.length;
   toast('นำเข้าสินค้าสำเร็จ '+done+' รายการ' + (skipped ? ' (ข้าม '+skipped+' แถวที่ข้อมูลไม่ครบ)' : ''));
 }
 
