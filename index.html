@@ -827,6 +827,7 @@ function toast(msg){
 
 /* beep via WebAudio, no external asset */
 function beep(type){
+  if(type === 'error') speakText('ผิด'); // สแกนผิด: ร้องว่า "ผิด" (ปิดได้ด้วยปุ่มเสียงพูด)
   try{
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
     const o = ctx.createOscillator();
@@ -845,8 +846,21 @@ function beep(type){
   }catch(e){}
 }
 
+/* เปิด/ปิดเสียงพูดเท่านั้น (เสียงบี๊ปยังทำงานตามปกติ) — จำค่าไว้ในเครื่อง */
+const VOICE_PREF_KEY = 'packcheck_voice_enabled';
+let voiceEnabled = true;
+try{ voiceEnabled = localStorage.getItem(VOICE_PREF_KEY) !== '0'; }catch(e){}
+function setVoiceEnabled(on){
+  voiceEnabled = !!on;
+  try{ localStorage.setItem(VOICE_PREF_KEY, on ? '1' : '0'); }catch(e){}
+  if(!on){ try{ speechSynthesis.cancel(); }catch(e){} }
+}
+function voiceToggleLabel(){
+  return voiceEnabled ? '🔊 เสียงพูด: เปิด' : '🔇 เสียงพูด: ปิด';
+}
 function speakText(text){
   try{
+    if(!voiceEnabled) return;
     if(!('speechSynthesis' in window)) return;
     const say = () => {
       const u = new SpeechSynthesisUtterance(text);
@@ -1360,6 +1374,7 @@ function renderStaffList(){
       <button class="btn secondary" id="clear-date-btn" style="max-width:130px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>🗑 เคลียร์วันนี้</button>
       <button class="btn secondary" id="export-stock-btn" style="max-width:170px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>📤 Export สรุปสต็อก</button>
       <button class="btn secondary" id="export-photos-btn" style="max-width:190px;margin-bottom:12px" ${!State.date||total===0?'disabled':''}>🖼️ Export พร้อมรูป (ZIP)</button>
+      <button class="btn secondary" id="voice-toggle-btn" style="max-width:170px;margin-bottom:12px">${voiceToggleLabel()}</button>
     </div>
     <div class="stats-row">
       <div class="stat"><div class="num">${total}</div><div class="lbl">ออเดอร์ทั้งหมด</div></div>
@@ -1430,6 +1445,14 @@ function wireStaffList(){
   const exportBtn = document.getElementById('export-stock-btn');
   if(exportBtn){
     exportBtn.onclick = () => exportStockReport(State.date, State.orders);
+  }
+  const voiceBtn = document.getElementById('voice-toggle-btn');
+  if(voiceBtn){
+    voiceBtn.onclick = () => {
+      setVoiceEnabled(!voiceEnabled);
+      voiceBtn.textContent = voiceToggleLabel();
+      if(voiceEnabled) speakText('เปิดเสียงพูดแล้ว');
+    };
   }
   const exportPhotosBtn = document.getElementById('export-photos-btn');
   if(exportPhotosBtn){
@@ -1717,7 +1740,7 @@ async function openOrder(orderId){
   // อ่านออกเสียงจำนวนชิ้นที่ยังต้องแพ็คของออเดอร์นี้ เช่น "5 ชิ้น"
   if(State.currentOrder && orderStatus(State.currentOrder) !== 'cancelled'){
     const remaining = State.currentOrder.items.reduce((sum, it) => sum + Math.max(0, (it.qtyRequired||0) - (it.qtyScanned||0)), 0);
-    if(remaining > 0) speakText(remaining + ' ชิ้น');
+    if(remaining > 0) speakText('เหลือ ' + remaining + ' ชิ้น');
   }
 }
 
