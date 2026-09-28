@@ -1714,6 +1714,11 @@ async function openOrder(orderId){
     }
   }
   render();
+  // อ่านออกเสียงจำนวนชิ้นที่ยังต้องแพ็คของออเดอร์นี้ เช่น "5 ชิ้น"
+  if(State.currentOrder && orderStatus(State.currentOrder) !== 'cancelled'){
+    const remaining = State.currentOrder.items.reduce((sum, it) => sum + Math.max(0, (it.qtyRequired||0) - (it.qtyScanned||0)), 0);
+    if(remaining > 0) speakText(remaining + ' ชิ้น');
+  }
 }
 
 /* ============ STAFF: DETAIL ============ */
