@@ -537,13 +537,18 @@ async function rawList(prefix){
   return snap.docs.map(d => d.id);
 }
 // one query that returns ids AND values (rawList + a get per doc downloaded every doc twice)
+function withTimeout(promise, ms, label){
+  let t;
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error((label||'การเชื่อมต่อ')+' หมดเวลา (เกิน '+Math.round(ms/1000)+' วินาที) — ตรวจสอบอินเทอร์เน็ตหรือโควต้า Firebase')), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
 async function rawListValues(prefix){
   if(!backendReady) return [];
-  const snap = await db.collection('packcheck')
+  const snap = await withTimeout(db.collection('packcheck')
     .orderBy(firebase.firestore.FieldPath.documentId())
     .startAt(prefix)
     .endAt(prefix + '\uf8ff')
-    .get();
+    .get(), 20000, 'การอ่านข้อมูลจาก Firebase');
   return snap.docs.map(d => ({ key: d.id, value: d.data().value }));
 }
 async function rawDelete(key){
@@ -563,13 +568,13 @@ async function sList(prefix, shared){
   try{ return await rawList(prefix); }
   catch(e){ console.error('list failed', prefix, e); return []; }
 }
-async function sListValues(prefix, shared){
+async function sListValues(prefix, shared, strict){
   let attempt = 0;
   while(true){
     try{ return await rawListValues(prefix); }
     catch(e){
       attempt++;
-      if(attempt > 3){ console.error('list values failed', prefix, e); return []; }
+      if(attempt > 2){ console.error('list values failed', prefix, e); if(strict) throw e; return []; }
       await sleep(400 * attempt);
     }
   }
@@ -599,7 +604,7 @@ async function batchCommitWithRetry(buildFn, maxRetries){
     try{
       const batch = db.batch();
       buildFn(batch);
-      await batch.commit();
+      await withTimeout(batch.commit(), 30000, 'การบันทึกข้อมูลไป Firebase');
       return true;
     }catch(e){
       attempt++;
@@ -2780,6 +2785,16 @@ function wireAdmin(){
   };
 
   document.getElementById('confirm-upload').onclick = async () => {
+    try{
+      await runImport();
+    }catch(e){
+      console.error('import failed', e);
+      toast('นำเข้าไม่สำเร็จ: ' + ((e && e.message) || e));
+      const b = document.getElementById('confirm-upload');
+      if(b){ b.disabled = false; b.textContent = 'นำเข้าข้อมูลอีกครั้ง'; }
+    }
+  };
+  const runImport = async () => {
     if(!backendReady){
       toast('ยังไม่ได้ตั้งค่าฐานข้อมูล (Firebase) — ระบบยังบันทึกข้อมูลไม่ได้ ดูคำแนะนำการตั้งค่าด้านบนก่อน');
       return;
@@ -2884,7 +2899,7 @@ function wireAdmin(){
     const prevByOriginalId = {}; // individual order id -> key of the existing doc that currently holds it
     const allExistingDocsByKey = {};
     if(mergeMode !== 'replace'){
-      const existingEntries = await sListValues('order:'+date+':', true);
+      const existingEntries = await sListValues('order:'+date+':', true, true);
       existingEntries.forEach(en => {
         const key = en.key, raw = en.value;
         if(!raw) return;
