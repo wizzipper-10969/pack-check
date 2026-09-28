@@ -249,6 +249,9 @@
   }
   .verify-popup.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
   .verify-popup.warn{border-color:var(--warn);}
+  .verify-popup .vp-photo{width:100%;max-height:38vh;object-fit:contain;border-radius:12px;margin-bottom:8px;display:block;background:rgba(0,0,0,.04);}
+  .verify-popup .vp-nophoto{font-size:12px;margin-bottom:8px;}
+  .verify-box-photo{width:100%;max-width:420px;max-height:50vh;object-fit:contain;border-radius:12px;display:block;margin-top:8px;border:1px solid rgba(255,255,255,.5);}
 
   .scan-bar{
     background:var(--surface);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1.5px solid rgba(224,138,0,.45);border-radius:20px;
@@ -2297,11 +2300,22 @@ function showVerifyPopup(order, kind){
   ).join('');
   const title = kind==='warn' ? '⚠ ซ้ำ — สแกนไปแล้ว' : '✅ สแกนแล้ว เตรียมจัดส่ง';
   el.innerHTML = `
+    <div id="vp-photo-slot"></div>
     <div style="font-weight:700;font-size:15px;margin-bottom:2px">${title}</div>
     <div class="mono" style="font-size:13px;margin-bottom:2px">${esc(order.orderId)}</div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(order.customer||'-')}</div>
     ${itemLines}
   `;
+  // รูปกล่องตอนแพ็คเสร็จ (พร้อมของ) — โหลดแล้วค่อยแสดงเหนือรายการ
+  const orderIdAtOpen = order.orderId;
+  getBoxPhotoForOrder(State.date, order.orderId).then(photo => {
+    const slot = document.getElementById('vp-photo-slot');
+    if(!slot || el.dataset.oid !== orderIdAtOpen) return;
+    slot.innerHTML = photo
+      ? `<img class="vp-photo" src="${photo}" alt="รูปตอนแพ็คเสร็จ">`
+      : `<div class="muted vp-nophoto">📷 ไม่มีรูปกล่องตอนแพ็ค</div>`;
+  }).catch(() => {});
+  el.dataset.oid = order.orderId;
   el.classList.toggle('warn', kind==='warn');
   el.classList.add('show');
   el.onclick = () => {
@@ -2310,7 +2324,7 @@ function showVerifyPopup(order, kind){
     openVerifyOrder(order.orderId);
   };
   clearTimeout(verifyPopupTimer);
-  verifyPopupTimer = setTimeout(() => { el.classList.remove('show'); }, 1800);
+  verifyPopupTimer = setTimeout(() => { el.classList.remove('show'); }, 5000); // นานพอให้ดูรูปกล่องเทียบกับของ
 }
 
 async function handleVerifyLookupScan(raw){
@@ -2359,6 +2373,7 @@ async function openVerifyOrder(orderId){
   State.currentVerifyOrder = raw ? JSON.parse(raw) : null;
   State.verifySub = 'detail';
   if(State.currentVerifyOrder){
+    await getBoxPhotoForOrder(State.date, State.currentVerifyOrder.orderId);
     const toLoad = State.currentVerifyOrder.items.filter(it => !(it.code in State.photoCache));
     await mapWithConcurrency(toLoad, 6, async it => {
       const v = await sGetWithRetry(photoKey(it.code), true);
@@ -2393,6 +2408,10 @@ function renderVerifyDetail(){
     </div>`;
   }).join('');
 
+  const verifyBoxPhoto = State.boxPhotoCache[State.date+':'+o.orderId] || null;
+  const boxPhotoBlock = verifyBoxPhoto
+    ? `<div style="margin:10px 0"><div class="muted" style="font-size:12px">📷 รูปตอนแพ็คเสร็จ (พร้อมของ)</div><img class="verify-box-photo" src="${verifyBoxPhoto}" alt="รูปตอนแพ็คเสร็จ"></div>`
+    : `<div class="muted" style="font-size:12px;margin:10px 0">📷 ไม่มีรูปกล่องตอนแพ็ค</div>`;
   const doneBanner = vst==='verified' ? `<div class="banner-done">
       <div class="big">✅ ตรวจสอบครบแล้ว พร้อมส่ง</div>
       <div class="time">${o.verifiedBy ? 'ตรวจสอบโดย '+esc(o.verifiedBy)+' · ' : ''}${o.verifiedAt ? new Date(o.verifiedAt).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
@@ -2408,6 +2427,7 @@ function renderVerifyDetail(){
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
     </div>
     ${doneBanner}
+    ${boxPhotoBlock}
 
     <div class="scan-bar">
       <div id="cam-wrap">
