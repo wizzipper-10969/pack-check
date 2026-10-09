@@ -1751,24 +1751,71 @@ function main_loading(){ document.getElementById('main').innerHTML = '<div class
 
 async function openOrder(orderId){
   State.currentOrderId = orderId;
-  const raw = await sGet(orderKey(State.date, orderId), true);
-  State.currentOrder = raw ? JSON.parse(raw) : null;
   State.staffSub = 'detail';
-  if(State.currentOrder){
+  // เปิดหน้าออเดอร์ "ทันที" จากข้อมูลที่โหลดไว้แล้วในรายการ (ไม่รอเครือข่าย)
+  // แล้วค่อยโหลดข้อมูลล่าสุด + รูปสินค้า/รูปกล่องเบื้องหลัง
+  const cached = (State.orders || []).find(o => o.orderId === orderId);
+  let shown = false;
+  if(cached){
+    try{
+      State.currentOrder = JSON.parse(JSON.stringify(cached));
+      shown = true;
+    }catch(e){ shown = false; }
+  }
+  const openedAt = State.currentOrder ? State.currentOrder.updatedAt : null;
+  const stillHere = () => State.currentOrderId === orderId && State.staffSub === 'detail' && State.view === 'staff';
+
+  if(shown){
+    render();
+    speakOrderPieces();
+  }
+
+  // ---- เบื้องหลัง (ถ้าแสดงไปแล้ว) หรือรอ (ถ้าไม่มีแคช) ----
+  const loadRest = async () => {
+    let changed = false;
+    // 1) ข้อมูลออเดอร์ล่าสุด — แทนที่ได้เฉพาะเมื่อผู้ใช้ยังไม่ได้ทำอะไรกับออเดอร์นี้
+    const raw = await sGet(orderKey(State.date, orderId), true);
+    if(!stillHere()) return;
+    if(raw){
+      try{
+        const fresh = JSON.parse(raw);
+        if(!State.currentOrder){ State.currentOrder = fresh; changed = true; }
+        else if(State.currentOrder.updatedAt === openedAt && fresh.updatedAt !== openedAt){
+          State.currentOrder = fresh; changed = true;
+        }
+      }catch(e){}
+    }
+    if(!State.currentOrder) return;
+    // 2) รูปสินค้า
     const toLoad = State.currentOrder.items.filter(it => !(it.code in State.photoCache));
     await mapWithConcurrency(toLoad, 6, async it => {
       const v = await sGetWithRetry('photo:'+sanitizeKeyPart(it.code), true);
       State.photoCache[it.code] = v || null;
+      if(v) changed = true;
     });
-    // always look for the saved box photo (it lives in its own doc, so it survives a
-    // re-import even when the order doc lost its boxPhotoAt flag)
+    // 3) รูปกล่อง
+    const hadBox = (State.date+':'+orderId) in State.boxPhotoCache;
     const savedBoxPhoto = await getBoxPhotoForOrder(State.date, orderId);
-    if(savedBoxPhoto && !State.currentOrder.boxPhotoAt){
+    if(savedBoxPhoto && State.currentOrder && !State.currentOrder.boxPhotoAt){
       State.currentOrder.boxPhotoAt = Date.now();
     }
+    if(savedBoxPhoto && !hadBox) changed = true;
+    if(changed && stillHere()) render();
+  };
+
+  if(shown){
+    loadRest().catch(e => console.error('openOrder background load failed', e));
+  } else {
+    await loadRest();
+    if(stillHere()){
+      if(!State.currentOrder){ render(); return; }
+      render();
+      speakOrderPieces();
+    }
   }
-  render();
-  // อ่านออกเสียงจำนวนชิ้นที่ยังต้องแพ็คของออเดอร์นี้ เช่น "5 ชิ้น"
+}
+// อ่านออกเสียงจำนวนชิ้นที่ยังต้องแพ็คของออเดอร์นี้ เช่น "5 ชิ้น"
+function speakOrderPieces(){
   if(State.currentOrder && orderStatus(State.currentOrder) !== 'cancelled'){
     const remaining = orderRemainingPieces(State.currentOrder);
     const total = orderTotalPieces(State.currentOrder);
