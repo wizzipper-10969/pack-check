@@ -2174,8 +2174,17 @@ async function handleOrderLookupScan(raw){
     return;
   }
   beep('success');
-  await stopCamera();
-  await openOrder(match.orderId);
+  // iOS Safari: html5Qr.stop() อาจค้างไม่คืนค่า ทำให้ไม่เด้งไปหน้าออเดอร์ — จึงไม่รอมัน
+  // (ปิดกล้องเบื้องหลัง พร้อม timeout) แล้วเปิดออเดอร์ทันที
+  const camBtn = document.getElementById('order-cam-toggle');
+  if(camBtn){ camBtn.textContent = '📷 เปิดกล้องสแกนใบปะหน้า'; camBtn.disabled = false; }
+  stopCamera().catch(()=>{});
+  try{
+    await openOrder(match.orderId);
+  }catch(err){
+    console.error('openOrder failed', err);
+    showFeedback('danger', '✕ เปิดออเดอร์ไม่สำเร็จ ลองสแกนใหม่อีกครั้ง');
+  }
 }
 
 /* ============ VERIFY BEFORE SHIPPING (final QC pass after packing) ============ */
@@ -2664,8 +2673,8 @@ async function startCamera(onDecode){
           }
           scanGuard = { code: text, lastSeen: now };
           scanCooldown = true;
-          onDecode(text);
           if(State.html5Qr){ try{ State.html5Qr.pause(true); }catch(e){} }
+          onDecode(text);
           setTimeout(() => {
             scanCooldown = false;
             scanGuard.lastSeen = Date.now(); // measure "barcode left the frame" from when scanning resumes
@@ -2701,15 +2710,25 @@ async function startCamera(onDecode){
   }
 }
 async function stopCamera(){
-  if(State.html5Qr && State.camActive){
-    try{
-      await State.html5Qr.stop();
-      try{ State.html5Qr.clear(); }catch(e){}
-    }catch(e){}
-  }
+  const qr = State.html5Qr;
   State.camActive = false;
   const wrap = document.getElementById('cam-wrap');
   if(wrap) wrap.classList.remove('active');
+  if(qr){
+    try{
+      // บน iPhone stop() บางครั้งไม่ resolve — รอไม่เกิน 1.2 วินาที
+      await Promise.race([ qr.stop(), new Promise(r => setTimeout(r, 1200)) ]);
+    }catch(e){}
+    // เผื่อ stop() ค้าง: ปิดสตรีมกล้องเองให้แน่ใจว่าไฟกล้องดับ
+    try{
+      document.querySelectorAll('#reader video').forEach(v => {
+        const ms = v.srcObject;
+        if(ms && ms.getTracks) ms.getTracks().forEach(t => { try{ t.stop(); }catch(e){} });
+      });
+    }catch(e){}
+    try{ qr.clear(); }catch(e){}
+    if(State.html5Qr === qr) State.html5Qr = null;
+  }
 }
 
 /* ============ ADMIN: UPLOAD ============ */
