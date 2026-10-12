@@ -672,8 +672,10 @@ function normOrderDate(v){
   }
   return String(v).trim();
 }
-function orderInfoLine(o, fs, mt){
-  if(!o.orderDate && !o.source) return '';
+function orderInfoLine(o, fs, mt, hint){
+  if(!o.orderDate && !o.source){
+    return hint ? `<div style="font-size:${fs}px;margin-top:${mt}px;color:var(--warn)">⚠ ออเดอร์นี้ยังไม่มีข้อมูลวันที่สั่ง/ช่องทาง — อัปโหลดไฟล์ออเดอร์ซ้ำ (เลือกจับคู่คอลัมน์วันที่สั่ง) เพื่อเติมข้อมูล</div>` : '';
+  }
   const parts=[];
   if(o.orderDate) parts.push('🗓 สั่งเมื่อ '+esc(o.orderDate));
   if(o.source) parts.push('🛒 สั่งจาก '+esc(o.source));
@@ -1911,7 +1913,7 @@ function renderDetail(){
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
-      ${orderInfoLine(o,12,2)}
+      ${orderInfoLine(o,12,2,true)}
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
       <div class="row" style="margin-top:10px">
         <button class="btn secondary" id="edit-order-btn">✏️ แก้ไขออเดอร์</button>
@@ -2535,7 +2537,7 @@ function renderVerifyDetail(){
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · ตรวจสอบแล้ว ${vprog.verified}/${vprog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
-      ${orderInfoLine(o,12,2)}
+      ${orderInfoLine(o,12,2,true)}
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
     </div>
     ${doneBanner}
