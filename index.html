@@ -658,6 +658,27 @@ function nowTime(){
   const p = n => String(n).padStart(2,'0');
   return p(d.getHours())+':'+p(d.getMinutes());
 }
+// วันที่สั่ง: ไฟล์ Excel บางที่ให้เป็นเลข serial, CSV ให้เป็นข้อความ — แปลงให้อ่านง่าย
+function normOrderDate(v){
+  if(v==null) return '';
+  if(v instanceof Date && !isNaN(v)){
+    const p=n=>String(n).padStart(2,'0');
+    return p(v.getDate())+'/'+p(v.getMonth()+1)+'/'+v.getFullYear()+' '+p(v.getHours())+':'+p(v.getMinutes());
+  }
+  if(typeof v==='number' && v>20000 && v<80000){
+    const ms=Math.round((v-25569)*86400*1000);
+    const d=new Date(ms), p=n=>String(n).padStart(2,'0');
+    return p(d.getUTCDate())+'/'+p(d.getUTCMonth()+1)+'/'+d.getUTCFullYear()+(v%1? ' '+p(d.getUTCHours())+':'+p(d.getUTCMinutes()):'');
+  }
+  return String(v).trim();
+}
+function orderInfoLine(o, fs, mt){
+  if(!o.orderDate && !o.source) return '';
+  const parts=[];
+  if(o.orderDate) parts.push('🗓 สั่งเมื่อ '+esc(o.orderDate));
+  if(o.source) parts.push('🛒 สั่งจาก '+esc(o.source));
+  return `<div class="muted" style="font-size:${fs}px;margin-top:${mt}px">${parts.join(' · ')}</div>`;
+}
 function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -1352,6 +1373,7 @@ function renderStaffList(){
           <div class="cust">${esc(o.customer||'-')}</div>
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
           ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:11px;margin-top:1px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์</div>` : ''}
+          ${orderInfoLine(o,11,1)}
         </div>
         <div style="text-align:right">
           <div class="progtext">${prog.scanned}/${prog.total} ชิ้น</div>
@@ -1889,6 +1911,7 @@ function renderDetail(){
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+      ${orderInfoLine(o,12,2)}
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
       <div class="row" style="margin-top:10px">
         <button class="btn secondary" id="edit-order-btn">✏️ แก้ไขออเดอร์</button>
@@ -2279,6 +2302,7 @@ function renderVerifyList(){
           <div class="oid">${esc(o.orderId)}</div>
           <div class="cust">${esc(o.customer||'-')}</div>
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
+          ${orderInfoLine(o,11,1)}
           ${o.packedBy ? `<div class="muted" style="font-size:11px;margin-top:1px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
         </div>
         <div style="text-align:right">
@@ -2511,6 +2535,7 @@ function renderVerifyDetail(){
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · ตรวจสอบแล้ว ${vprog.verified}/${vprog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
+      ${orderInfoLine(o,12,2)}
       ${o.packedBy ? `<div class="muted" style="font-size:12px;margin-top:2px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
     </div>
     ${doneBanner}
@@ -2821,6 +2846,16 @@ function renderAdmin(){
   const gCode = guess(['seller sku','sku']);
   const gQty = guess(['qty','quantity','จำนวน']);
   const gCust = guess(['nickname','buyer','ลูกค้า','ถึง']);
+  const guessOpt = (keywords) => {
+    for(const k of keywords){
+      const idx = headers.findIndex(h => h.toLowerCase().includes(k));
+      if(idx>=0) return idx;
+    }
+    return -1;
+  };
+  const optsOpt = (sel) => '<option value="-1">— ไม่ใช้ —</option>' + opts(sel);
+  const gDate = guessOpt(['created time','create time','order time','order date','paid time','วันที่สั่ง','เวลาที่สั่ง','วันที่']);
+  const gSource = guessOpt(['platform','channel','source','ช่องทาง','แพลตฟอร์ม']);
   const gTrack = guess(['tracking','awb','พัสดุ','courier','เลขติดตาม','waybill']);
 
   const opts = (selectedIdx) => headers.map((h,i) => `<option value="${i}" ${i===selectedIdx?'selected':''}>${esc(h)}</option>`).join('');
@@ -2859,6 +2894,12 @@ function renderAdmin(){
       <select id="map-cust"><option value="-1">— ไม่ใช้ —</option>${opts(gCust)}</select>
       <label>คอลัมน์หมายเลขพัสดุ/เลขติดตาม (ไม่บังคับ — ใส่ถ้าอยากให้สแกนใบปะหน้าแล้วเปิดออเดอร์อัตโนมัติได้)</label>
       <select id="map-track"><option value="-1">— ไม่ใช้ —</option>${opts(gTrack)}</select>
+      <label>คอลัมน์วันที่/เวลาที่ลูกค้าสั่ง (ไม่บังคับ — เช่น Created Time)</label>
+      <select id="map-date">${optsOpt(gDate)}</select>
+      <label>คอลัมน์ช่องทางที่สั่ง (ไม่บังคับ — ถ้าไฟล์ไม่มีคอลัมน์นี้ ใช้ช่องด้านล่างแทน)</label>
+      <select id="map-source">${optsOpt(gSource)}</select>
+      <label>ช่องทางที่สั่ง (ใช้เมื่อไม่ได้เลือกคอลัมน์ด้านบน)</label>
+      <input type="text" id="map-source-default" value="TikTok Shop" placeholder="เช่น TikTok Shop, Shopee, Lazada, LINE">
       <div class="muted" style="font-size:12px;margin:10px 0 4px">ตัวอย่างข้อมูล</div>
       ${previewHtml}
     </div>
@@ -2967,6 +3008,12 @@ function wireAdmin(){
     const custI = custIdxVal==='-1' ? -1 : parseInt(custIdxVal);
     const trackIdxVal = document.getElementById('map-track').value;
     const trackI = trackIdxVal==='-1' ? -1 : parseInt(trackIdxVal);
+    const dateIdxVal = document.getElementById('map-date').value;
+    const dateI = dateIdxVal==='-1' ? -1 : parseInt(dateIdxVal);
+    const srcIdxVal = document.getElementById('map-source').value;
+    const srcI = srcIdxVal==='-1' ? -1 : parseInt(srcIdxVal);
+    const srcDefault = (document.getElementById('map-source-default').value || '').trim();
+    const dateH = dateI>=0 ? headers[dateI] : null, srcH = srcI>=0 ? headers[srcI] : null;
     const oh = headers[oi], nh = headers[ni], ch = headers[ci], qh = headers[qi], custH = custI>=0 ? headers[custI] : null, trackH = trackI>=0 ? headers[trackI] : null;
 
     const setDefs = await loadAllSetDefs();
@@ -2982,7 +3029,7 @@ function wireAdmin(){
       if(!orderIdRaw || !codeRaw){ skippedInvalid++; return; }
       const orderId = orderIdRaw;
       const code = codeRaw;
-      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', items: [] };
+      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH ? String(r[srcH]||'').trim() : '') || srcDefault, items: [] };
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
       if(isNaN(qty) || qty<=0) qty = 1;
@@ -3157,6 +3204,8 @@ function wireAdmin(){
       grouped[mergedOrderId] = Object.assign({
         orderId: mergedOrderId,
         customer: group.map(o => o.customer).find(Boolean) || '',
+        orderDate: group.map(o => o.orderDate).find(Boolean) || '',
+        source: group.map(o => o.source).find(Boolean) || '',
         tracking: group[0].tracking,
         originalOrderIds,
         items: mergedItems
