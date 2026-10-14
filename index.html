@@ -585,11 +585,94 @@ async function sListValues(prefix, shared, strict){
   }
 }
 function sleep(ms){ return new Promise(res => setTimeout(res, ms)); }
+
+/* ============ LOCAL CACHE (IndexedDB) ============
+   เก็บรูปสินค้า/รูปกล่อง/รายการเซทไว้ในเครื่อง เพื่อลดการอ่าน Firebase (โควต้าฟรี 50K reads/วัน)
+   - รูปจริง: ใช้แคชได้ 3 วัน | ไม่มีรูป: แคช 1 ชม. (รูปกล่อง 5 นาที)
+   - เขียนรูปจากเครื่องนี้ จะอัปเดตแคชให้ทันที */
+const HOUR_MS = 3600 * 1000;
+function isCacheableKey(key){
+  key = String(key);
+  return key.indexOf('photo:') === 0 || key.indexOf('boxphoto:') === 0;
+}
+function cacheTtlFor(key, hasValue){
+  if(String(key).indexOf('boxphoto:') === 0) return hasValue ? 3 * 24 * HOUR_MS : 5 * 60 * 1000;
+  return hasValue ? 3 * 24 * HOUR_MS : HOUR_MS;
+}
+let idbPromise = null;
+function idbOpen(){
+  if(idbPromise) return idbPromise;
+  idbPromise = new Promise(resolve => {
+    try{
+      if(!window.indexedDB){ resolve(null); return; }
+      const req = indexedDB.open('packcheck-cache', 1);
+      req.onupgradeneeded = () => { try{ req.result.createObjectStore('kv'); }catch(e){} };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    }catch(e){ resolve(null); }
+  });
+  return idbPromise;
+}
+async function idbGet(key){
+  const d = await idbOpen();
+  if(!d) return null;
+  return new Promise(resolve => {
+    try{
+      const r = d.transaction('kv', 'readonly').objectStore('kv').get(key);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    }catch(e){ resolve(null); }
+  });
+}
+async function idbSet(key, v){
+  const d = await idbOpen();
+  if(!d) return;
+  return new Promise(resolve => {
+    try{
+      const tx = d.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put({ v: v, t: Date.now() }, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+async function idbDel(key){
+  const d = await idbOpen();
+  if(!d) return;
+  return new Promise(resolve => {
+    try{
+      const tx = d.transaction('kv', 'readwrite');
+      tx.objectStore('kv').delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+async function idbClear(){
+  const d = await idbOpen();
+  if(!d) return;
+  return new Promise(resolve => {
+    try{
+      const tx = d.transaction('kv', 'readwrite');
+      tx.objectStore('kv').clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
 async function sSetWithRetry(key, value, shared, maxRetries){
   maxRetries = maxRetries || 6;
   let attempt = 0;
   while(attempt <= maxRetries){
-    try{ return await rawSet(key, value); }
+    try{
+      const res = await rawSet(key, value);
+      if(isCacheableKey(key)) idbSet(key, value);
+      return res;
+    }
     catch(e){
       attempt++;
       if(attempt > maxRetries){ console.error('storage set gave up', key, e); return null; }
@@ -598,7 +681,7 @@ async function sSetWithRetry(key, value, shared, maxRetries){
   }
 }
 async function sDelete(key){
-  try{ await rawDelete(key); }catch(e){ console.error('delete failed', key, e); }
+  try{ await rawDelete(key); if(isCacheableKey(key)) idbDel(key); }catch(e){ console.error('delete failed', key, e); }
 }
 
 /* ---- Batched writes/deletes: up to 400 docs per network round-trip (Firestore limit is 500) ---- */
@@ -1047,9 +1130,21 @@ async function clearOrdersForDate(date){
 
 async function sGetWithRetry(key, shared, maxRetries){
   maxRetries = maxRetries || 4;
+  const cacheable = isCacheableKey(key);
+  if(cacheable){
+    const c = await idbGet(key);
+    if(c){
+      const age = Date.now() - (c.t || 0);
+      if(age >= 0 && age < cacheTtlFor(key, !!c.v)) return c.v || null;
+    }
+  }
   let attempt = 0;
   while(attempt <= maxRetries){
-    try{ return await rawGet(key); }
+    try{
+      const v = await rawGet(key);
+      if(cacheable) idbSet(key, v || null);
+      return v;
+    }
     catch(e){
       attempt++;
       if(attempt > maxRetries) return null;
@@ -1119,6 +1214,19 @@ async function fetchOrderRaw(date, orderId){
   return await sGet(orderKey(date, orderId), true);
 }
 
+// ออเดอร์เดิมของวันนั้นสำหรับขั้นนำเข้า: ถ้ากำลังฟังวันนั้นอยู่ ใช้ข้อมูลในแคช (ไม่เสีย read) — ไม่งั้นอ่านจาก Firebase
+async function getExistingOrderEntries(date){
+  if(orderLive.date === date && orderLive.ready && !orderLive.failed){
+    try{
+      await orderLive.ready;
+      if(orderLive.date === date && !orderLive.failed){
+        return Array.from(orderLive.docs.entries()).map(([key, value]) => ({ key, value }));
+      }
+    }catch(e){}
+  }
+  return await sListValues('order:'+date+':', true, true);
+}
+
 async function loadOrdersForDate(date){
   if(!backendReady) return [];
   try{
@@ -1150,12 +1258,23 @@ function orderKey(date, orderId){ return 'order:'+date+':'+sanitizeKeyPart(order
 /* รายการสินค้า (catalog) สำหรับพิมพ์บาร์โค้ด/เลือกสินค้า
    เดิมวนอ่านออเดอร์ "ทุกวันที่เคยอัปโหลด" ทุกครั้งที่เปิดแท็บพิมพ์/ตั้งค่าเซท/แก้ไขออเดอร์ — เป็นตัวกิน reads หลัก
    ตอนนี้ใช้: ออเดอร์ของวันที่เลือก (จากตัวฟังที่เปิดอยู่ ไม่เสีย read) + รายการเซท/สินค้าที่ตั้งค่าไว้ (แคชในเครื่อง) */
+let setEntriesCacheAt = 0;
+const SET_CACHE_TTL = 12 * 60 * 60 * 1000; // รายการเซท/สินค้า: ใช้แคชในเครื่องได้ 12 ชม.
 let setEntriesCache = null; // [{key,value}] — โหลดครั้งเดียวต่อเซสชัน
-async function loadSetEntries(force){
-  if(setEntriesCache && !force) return setEntriesCache;
+async function loadSetEntries(force, strict){
+  if(!force){
+    if(!setEntriesCache){
+      const c = await idbGet('meta:setentries');
+      if(c && Array.isArray(c.v)){ setEntriesCache = c.v; setEntriesCacheAt = c.t || 0; }
+    }
+    if(setEntriesCache && (Date.now() - setEntriesCacheAt) < SET_CACHE_TTL) return setEntriesCache;
+  }
   try{
     setEntriesCache = await sListValues('set:', true, true);
+    setEntriesCacheAt = Date.now();
+    idbSet('meta:setentries', setEntriesCache);
   }catch(e){
+    if(strict) throw e;
     console.error('load sets failed', e); // ไม่แคชค่าว่างตอนอ่านพลาด
     return setEntriesCache || [];
   }
@@ -1287,8 +1406,7 @@ async function refreshSets(force){
 async function loadAllSetDefs(){
   // ตอนนำเข้าออเดอร์อ่านสดเสมอ (เผื่อเครื่องอื่นแก้เซทไว้) และถ้าอ่านไม่สำเร็จให้หยุดนำเข้า
   // ดีกว่าปล่อยให้นำเข้าต่อโดยไม่แตกเซท (ออเดอร์จะผิดทั้งชุด)
-  const entries = await sListValues('set:', true, true);
-  setEntriesCache = entries;
+  const entries = await loadSetEntries(false, true);
   const byCode = {}, byName = {};
   const results = entries.map(en => {
     if(!en.value) return null;
@@ -3365,7 +3483,7 @@ function wireAdmin(){
     const prevByOriginalId = {}; // individual order id -> key of the existing doc that currently holds it
     const allExistingDocsByKey = {};
     if(mergeMode !== 'replace'){
-      const existingEntries = await sListValues('order:'+date+':', true, true);
+      const existingEntries = await getExistingOrderEntries(date);
       existingEntries.forEach(en => {
         const key = en.key, raw = en.value;
         if(!raw) return;
@@ -3491,7 +3609,7 @@ function wireAdmin(){
     let restoredCount = 0;
 
     if(mergeMode==='replace'){
-      const existingKeys = await sList('order:'+date+':', true);
+      const existingKeys = (await getExistingOrderEntries(date)).map(en => en.key);
       await sBatchDelete(existingKeys);
     } else {
       // remove any old doc now fully superseded by this upload (an old combined doc
@@ -3814,6 +3932,7 @@ function renderSets(){
       <div class="card muted" style="font-size:13px;line-height:1.6">
         สำหรับสินค้าที่จริงๆ แล้วต้องหยิบสินค้าเดี่ยวหลายชิ้นมารวมกัน — ตั้งค่าครั้งเดียวว่าเซทนั้นประกอบด้วยอะไรบ้าง ระบบจะแตกเป็นรายการย่อยให้อัตโนมัติทุกครั้งที่อัปโหลดออเดอร์ใหม่ จับคู่ได้ทั้งด้วยรหัส SKU หรือด้วยชื่อสินค้า (สำหรับเซทที่ไม่มี SKU เพราะติดเรื่องโปรแกรมบัญชี)
       </div>
+      <button class="btn ghost" id="reload-cache-btn" style="margin-bottom:10px">🔄 โหลดสินค้า/รูปใหม่จากเซิร์ฟเวอร์ (ใช้เมื่อแก้จากเครื่องอื่น)</button>
       <button class="btn" id="new-set-btn">+ เพิ่มเซทใหม่ (ทีละรายการ)</button>
       <div class="card" style="margin-top:12px">
         <div style="font-weight:700;margin-bottom:6px">นำเข้าหลายเซทพร้อมกันจากไฟล์ Excel</div>
@@ -3905,6 +4024,17 @@ function downloadSetTemplate(){
 
 function wireSets(){
   if(!State.setForm){
+    const reloadBtn = document.getElementById('reload-cache-btn');
+    if(reloadBtn) reloadBtn.onclick = async () => {
+      reloadBtn.disabled = true; reloadBtn.textContent = 'กำลังโหลด...';
+      await idbClear();
+      State.photoCache = {};
+      setEntriesCache = null; setEntriesCacheAt = 0;
+      await refreshSets(true);
+      toast('โหลดข้อมูลใหม่จากเซิร์ฟเวอร์แล้ว');
+      document.getElementById('main').innerHTML = renderSets();
+      wireSets();
+    };
     const newBtn = document.getElementById('new-set-btn');
     if(newBtn) newBtn.onclick = () => {
       State.setForm = { matchBy:'code', matchValue:'', name: '', components:[{code:'',name:'',qty:1}], editing:false, origKey:null };
