@@ -20,6 +20,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- BarcodeDetector polyfill (ZXing WASM): ใช้เฉพาะเบราว์เซอร์ที่ไม่มีของระบบ (เช่น iOS) — Android ยังใช้ตัวของระบบเหมือนเดิม -->
+<script src="https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/polyfill.js" onerror="console.warn('barcode-detector polyfill load failed')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
 <style>
@@ -852,10 +854,24 @@ function toast(msg){
 }
 
 /* beep via WebAudio, no external asset */
+// ใช้ AudioContext ตัวเดียวตลอด (iOS สร้าง/ปิดบ่อยแล้วช้า และจำกัดจำนวน context)
+let sharedAudioCtx = null;
+function getAudioCtx(){
+  if(!sharedAudioCtx){
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return null;
+    sharedAudioCtx = new AC();
+  }
+  if(sharedAudioCtx.state === 'suspended'){ try{ sharedAudioCtx.resume(); }catch(e){} }
+  return sharedAudioCtx;
+}
+// iOS ต้องปลดล็อกเสียงด้วยการแตะครั้งแรก
+['touchend','click','keydown'].forEach(ev => document.addEventListener(ev, () => { try{ getAudioCtx(); }catch(e){} }, { once:true, passive:true }));
 function beep(type){
   if(type === 'error') speakText('ผิด'); // สแกนผิด: ร้องว่า "ผิด" (ปิดได้ด้วยปุ่มเสียงพูด)
   try{
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const ctx = getAudioCtx();
+    if(!ctx) return;
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
@@ -868,7 +884,6 @@ function beep(type){
     g.gain.setValueAtTime(0.15, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+dur);
     o.start(); o.stop(ctx.currentTime+dur+0.02);
-    setTimeout(()=>ctx.close(), (dur+0.1)*1000);
   }catch(e){}
 }
 
@@ -963,6 +978,7 @@ const State = {
   currentOrder: null,
   search: '',
   html5Qr: null,
+  nativeCam: null, // {stream, video, timer, running} — เส้นทางสแกนหลัก (BarcodeDetector)
   camActive: false,
   verifySub: 'list',
   currentVerifyOrder: null,
@@ -999,21 +1015,32 @@ async function loadDateIndex(){
   State.dates = arr;
   return arr;
 }
-async function addDateToIndex(date){
-  const raw = await sGet('dateindex', true);
+// อ่านดัชนีวันที่แบบเข้มงวด: ถ้าอ่านไม่สำเร็จ (เช่น เต็มโควต้า/เน็ตหลุด) ให้ throw — ห้ามถือว่า "ว่าง"
+// แล้วเขียนทับ ไม่งั้นรายการวันที่เก่าทั้งหมดจะหายจากหน้าจอ
+async function readDateIndexStrict(){
+  const raw = await rawGet('dateindex');
   let arr = [];
   try{ arr = raw ? JSON.parse(raw) : []; }catch(e){ arr=[]; }
-  if(!arr.includes(date)){ arr.push(date); await sSet('dateindex', JSON.stringify(arr), true); }
+  return arr;
+}
+async function addDateToIndex(date){
+  const arr = await readDateIndexStrict();
+  if(!arr.includes(date)){ arr.push(date); await rawSet('dateindex', JSON.stringify(arr)); }
 }
 async function removeDateFromIndex(date){
-  const raw = await sGet('dateindex', true);
-  let arr = [];
-  try{ arr = raw ? JSON.parse(raw) : []; }catch(e){ arr=[]; }
+  let arr = await readDateIndexStrict();
   arr = arr.filter(d => d !== date);
-  await sSet('dateindex', JSON.stringify(arr), true);
+  await rawSet('dateindex', JSON.stringify(arr));
 }
 async function clearOrdersForDate(date){
-  const keys = await sList('order:'+date+':', true);
+  await readDateIndexStrict(); // ถ้าดัชนีอ่านไม่ได้ ให้หยุดก่อนลบอะไร
+  let keys;
+  if(orderLive.date === date && orderLive.ready && !orderLive.failed){
+    await orderLive.ready;
+    keys = Array.from(orderLive.docs.keys()); // จากตัวฟังที่เปิดอยู่ ไม่เสีย read เพิ่ม
+  } else {
+    keys = await rawList('order:'+date+':'); // throw ถ้าอ่านไม่ได้ (เดิม sList คืน [] เงียบๆ)
+  }
   await sBatchDelete(keys);
   await removeDateFromIndex(date);
 }
@@ -1044,13 +1071,69 @@ async function mapWithConcurrency(items, limit, fn){
   return results;
 }
 
-async function loadOrdersForDate(date){
-  const entries = await sListValues('order:'+date+':', true);
-  const results = entries.map(en => {
-    if(!en.value) return null;
-    try{ return JSON.parse(en.value); }catch(e){ return null; }
+/* ---- ออเดอร์ของวันที่เลือก: ฟังแบบ realtime (onSnapshot) แทนการ query ใหม่ทุกครั้ง ----
+   เดิมทุกครั้งที่เปิดรายการ/กดกลับ/สลับแท็บ/แพ็คเสร็จ 1 ออเดอร์ จะอ่านออเดอร์ "ทั้งวัน" ใหม่
+   (N ออเดอร์ = N reads ต่อครั้ง) จนเกินโควต้าฟรี 50K reads/วัน
+   ตอนนี้อ่านทั้งวันครั้งเดียวตอนเปิดวันนั้น หลังจากนั้นเสียแค่ doc ที่มีการเปลี่ยนแปลง
+   (ที่เครื่องนี้เขียนเองไม่นับ) และยังเห็นความเคลื่อนไหวจากเครื่องอื่นแบบสดๆ */
+const orderLive = { date: null, docs: new Map(), ready: null, unsub: null, failed: false };
+function stopOrderWatch(){
+  if(orderLive.unsub){ try{ orderLive.unsub(); }catch(e){} }
+  orderLive.unsub = null; orderLive.date = null; orderLive.docs = new Map(); orderLive.ready = null; orderLive.failed = false;
+}
+function watchOrders(date){
+  if(orderLive.date === date && orderLive.ready && !orderLive.failed) return orderLive.ready;
+  stopOrderWatch();
+  const docs = new Map();
+  const prefix = 'order:'+date+':';
+  orderLive.date = date;
+  orderLive.docs = docs;
+  const ready = new Promise((resolve, reject) => {
+    let first = true;
+    orderLive.unsub = db.collection('packcheck')
+      .orderBy(firebase.firestore.FieldPath.documentId())
+      .startAt(prefix)
+      .endAt(prefix + '')
+      .onSnapshot(snap => {
+        snap.docChanges().forEach(ch => {
+          if(ch.type === 'removed') docs.delete(ch.doc.id);
+          else docs.set(ch.doc.id, ch.doc.data().value);
+        });
+        if(first){ first = false; resolve(); }
+      }, err => {
+        console.error('order listener failed', err);
+        if(orderLive.docs === docs) orderLive.failed = true; // รอบหน้าจะเริ่มฟังใหม่
+        if(first){ first = false; reject(err); }
+      });
   });
-  const orders = results.filter(Boolean);
+  ready.catch(() => {});
+  orderLive.ready = ready;
+  return ready;
+}
+// ออเดอร์เดียวจากแคชที่กำลังฟังอยู่ (ไม่เสีย read) — ถ้าไม่มีในแคชค่อยอ่านจาก Firebase
+async function fetchOrderRaw(date, orderId){
+  if(orderLive.date === date && !orderLive.failed){
+    const v = orderLive.docs.get(sanitizeDocId(orderKey(date, orderId)));
+    if(v) return v;
+  }
+  return await sGet(orderKey(date, orderId), true);
+}
+
+async function loadOrdersForDate(date){
+  if(!backendReady) return [];
+  try{
+    await withTimeout(watchOrders(date), 20000, 'การอ่านข้อมูลจาก Firebase');
+  }catch(e){
+    console.error('load orders failed', date, e);
+    stopOrderWatch();
+    toast('อ่านข้อมูลออเดอร์ไม่ได้ — อาจเต็มโควต้า Firebase หรืออินเทอร์เน็ตมีปัญหา');
+    return [];
+  }
+  const orders = [];
+  orderLive.docs.forEach(v => {
+    if(!v) return;
+    try{ orders.push(JSON.parse(v)); }catch(e){}
+  });
   orders.sort((a,b) => {
     const sa = orderStatus(a), sb = orderStatus(b);
     const rank = {pending:0, progress:1, done:2, cancelled:3};
@@ -1064,11 +1147,24 @@ function sanitizeKeyPart(s){
 }
 function orderKey(date, orderId){ return 'order:'+date+':'+sanitizeKeyPart(orderId); }
 
-async function refreshPrintCodes(){
-  await loadDateIndex();
+/* รายการสินค้า (catalog) สำหรับพิมพ์บาร์โค้ด/เลือกสินค้า
+   เดิมวนอ่านออเดอร์ "ทุกวันที่เคยอัปโหลด" ทุกครั้งที่เปิดแท็บพิมพ์/ตั้งค่าเซท/แก้ไขออเดอร์ — เป็นตัวกิน reads หลัก
+   ตอนนี้ใช้: ออเดอร์ของวันที่เลือก (จากตัวฟังที่เปิดอยู่ ไม่เสีย read) + รายการเซท/สินค้าที่ตั้งค่าไว้ (แคชในเครื่อง) */
+let setEntriesCache = null; // [{key,value}] — โหลดครั้งเดียวต่อเซสชัน
+async function loadSetEntries(force){
+  if(setEntriesCache && !force) return setEntriesCache;
+  try{
+    setEntriesCache = await sListValues('set:', true, true);
+  }catch(e){
+    console.error('load sets failed', e); // ไม่แคชค่าว่างตอนอ่านพลาด
+    return setEntriesCache || [];
+  }
+  return setEntriesCache;
+}
+async function refreshPrintCodes(forceSets){
   const map = {}; // code -> name
-  for(const date of State.dates){
-    const orders = await loadOrdersForDate(date);
+  if(State.date){
+    const orders = await loadOrdersForDate(State.date);
     orders.forEach(o => {
       o.items.forEach(it => {
         if(it.code) map[it.code] = it.name || map[it.code] || '';
@@ -1078,7 +1174,7 @@ async function refreshPrintCodes(){
   // also include codes registered via "ตั้งค่าเซท" (components), so products can be
   // pre-registered with a barcode/photo before they ever appear in an actual order —
   // this also covers standalone no-SKU products added as a 1-item "set"
-  const setEntries = await sListValues('set:', true);
+  const setEntries = await loadSetEntries(forceSets);
   const setDefsRaw = setEntries.map(en => {
     if(!en.value) return null;
     try{ return JSON.parse(en.value); }catch(e){ return null; }
@@ -1178,9 +1274,9 @@ function normalizeSetDef(def){
   return def;
 }
 
-async function refreshSets(){
-  await refreshPrintCodes(); // so we have the code+name catalog for the picker
-  const entries = await sListValues('set:', true);
+async function refreshSets(force){
+  await refreshPrintCodes(force); // so we have the code+name catalog for the picker
+  const entries = await loadSetEntries(); // อ่านจากแคชที่เพิ่งโหลด ไม่อ่านซ้ำ
   const results = entries.map(en => {
     if(!en.value) return null;
     try{ return normalizeSetDef(JSON.parse(en.value)); }catch(e){ return null; }
@@ -1189,7 +1285,10 @@ async function refreshSets(){
 }
 
 async function loadAllSetDefs(){
-  const entries = await sListValues('set:', true);
+  // ตอนนำเข้าออเดอร์อ่านสดเสมอ (เผื่อเครื่องอื่นแก้เซทไว้) และถ้าอ่านไม่สำเร็จให้หยุดนำเข้า
+  // ดีกว่าปล่อยให้นำเข้าต่อโดยไม่แตกเซท (ออเดอร์จะผิดทั้งชุด)
+  const entries = await sListValues('set:', true, true);
+  setEntriesCache = entries;
   const byCode = {}, byName = {};
   const results = entries.map(en => {
     if(!en.value) return null;
@@ -1276,8 +1375,10 @@ async function render(){
     wireSets();
   } else if(State.view==='verify'){
     if(State.verifySub==='detail' && State.currentVerifyOrder){
+      const keptCam = detachLiveCamera();
       main.innerHTML = renderVerifyDetail();
       wireVerifyDetail();
+      reattachLiveCamera(keptCam);
     } else {
       main.innerHTML = '<div class="empty">กำลังโหลด...</div>';
       await refreshVerifyList();
@@ -1286,8 +1387,10 @@ async function render(){
     }
   } else {
     if(State.staffSub==='detail' && State.currentOrder){
+      const keptCam = detachLiveCamera();
       main.innerHTML = renderDetail();
       wireDetail();
+      reattachLiveCamera(keptCam);
     } else {
       main.innerHTML = '<div class="empty">กำลังโหลด...</div>';
       await refreshStaffList();
@@ -1489,7 +1592,14 @@ function wireStaffList(){
       const ok = confirm('ลบออเดอร์ทั้งหมดของวันที่ '+fmtDateTH(State.date)+' ('+State.orders.length+' ออเดอร์) ใช่หรือไม่? การลบนี้ย้อนกลับไม่ได้');
       if(!ok) return;
       clearBtn.disabled = true; clearBtn.textContent = 'กำลังลบ...';
-      await clearOrdersForDate(State.date);
+      try{
+        await clearOrdersForDate(State.date);
+      }catch(err){
+        console.error('clear date failed', err);
+        toast('เคลียร์ไม่สำเร็จ (อ่าน/เขียน Firebase ไม่ได้ — อาจเต็มโควต้า) ลองใหม่ภายหลัง และตรวจรายการอีกครั้ง');
+        clearBtn.disabled = false; clearBtn.textContent = '🗑 เคลียร์วันนี้';
+        return;
+      }
       toast('เคลียร์ออเดอร์ของวันที่ '+fmtDateTH(State.date)+' แล้ว');
       main_loading();
       await refreshStaffList();
@@ -1798,7 +1908,7 @@ async function openOrder(orderId){
   const loadRest = async () => {
     let changed = false;
     // 1) ข้อมูลออเดอร์ล่าสุด — แทนที่ได้เฉพาะเมื่อผู้ใช้ยังไม่ได้ทำอะไรกับออเดอร์นี้
-    const raw = await sGet(orderKey(State.date, orderId), true);
+    const raw = await fetchOrderRaw(State.date, orderId);
     if(!stillHere()) return;
     if(raw){
       try{
@@ -2461,7 +2571,7 @@ async function handleVerifyLookupScan(raw){
 
   // one scan of the shipping label = the whole order is confirmed ready to ship — no
   // need to re-scan every item individually again
-  const raw2 = await sGet(orderKey(State.date, match.orderId), true);
+  const raw2 = await fetchOrderRaw(State.date, match.orderId);
   const order = raw2 ? JSON.parse(raw2) : match;
 
   if(verifyStatusOf(order) === 'verified'){
@@ -2482,7 +2592,7 @@ async function handleVerifyLookupScan(raw){
 }
 
 async function openVerifyOrder(orderId){
-  const raw = await sGet(orderKey(State.date, orderId), true);
+  const raw = await fetchOrderRaw(State.date, orderId);
   State.currentVerifyOrder = raw ? JSON.parse(raw) : null;
   State.verifySub = 'detail';
   if(State.currentVerifyOrder){
@@ -2683,7 +2793,151 @@ let scanCooldown = false;
 // the barcode in front of the camera re-counted it every ~1s (1/5 -> 2/5 -> ... 5/5).
 const SCAN_CLEAR_MS = 1500;
 let scanGuard = { code: null, lastSeen: 0 };
+/* ---- เส้นทางสแกนหลัก: getUserMedia + BarcodeDetector ตัวเดียว (ของระบบบน Android / WASM บน iOS)
+   ไม่ผ่าน html5-qrcode เพราะมันสลับไปใช้ตัวถอดรหัส JS ทุกเฟรมแม้มี BarcodeDetector ----
+   คืนค่า: true = เปิดสำเร็จ, 'denied' = ไม่อนุญาต/ไม่มีกล้อง (แจ้งแล้ว ไม่ต้องลองซ้ำ),
+           false = ใช้เส้นทางนี้ไม่ได้ ให้ถอยไปใช้ html5-qrcode เดิม */
+async function startCameraNative(onDecode){
+  const wrap = document.getElementById('cam-wrap');
+  const host = document.getElementById('reader');
+  if(!wrap || !host) return false;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+
+  let detector;
+  try{
+    let formats = ['qr_code','code_128'];
+    if(typeof BarcodeDetector.getSupportedFormats === 'function'){
+      const sup = await BarcodeDetector.getSupportedFormats();
+      formats = formats.filter(f => sup.includes(f));
+    }
+    if(!formats.length) return false;
+    detector = new BarcodeDetector({ formats });
+  }catch(e){ return false; }
+
+  scanGuard = { code: null, lastSeen: 0 };
+  wrap.classList.add('active');
+  State.camActive = true;
+
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+  }catch(err){
+    wrap.classList.remove('active');
+    State.camActive = false;
+    const name = (err && err.name) || '';
+    if(name === 'NotAllowedError'){
+      toast('ไม่ได้รับอนุญาตให้ใช้กล้อง — ตรวจสอบสิทธิ์กล้องของเบราว์เซอร์ หรือพิมพ์รหัส/ใช้เครื่องยิงบาร์โค้ดแทน');
+      return 'denied';
+    }
+    if(name === 'NotFoundError'){
+      toast('ไม่พบกล้องบนอุปกรณ์นี้ — พิมพ์รหัส หรือใช้เครื่องยิงบาร์โค้ดแทน');
+      return 'denied';
+    }
+    return false;
+  }
+  // ผู้ใช้กดปิดกล้อง/เปลี่ยนหน้าระหว่างรอขอสิทธิ์
+  if(!State.camActive){ stream.getTracks().forEach(t => { try{ t.stop(); }catch(e){} }); return 'denied'; }
+
+  const video = document.createElement('video');
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  video.muted = true;
+  video.autoplay = true;
+  video.style.cssText = 'width:100%;max-height:48vh;object-fit:cover;display:block;background:#000';
+  host.innerHTML = '';
+  host.appendChild(video);
+  video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+
+  // โฟกัสต่อเนื่อง (เฉพาะเครื่อง/เบราว์เซอร์ที่รองรับ — iOS Safari จะข้ามไปเอง)
+  try{
+    const track = stream.getVideoTracks()[0];
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    if(caps.focusMode && caps.focusMode.includes('continuous')){
+      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+    }
+  }catch(e){}
+
+  const cam = { stream, video, timer: null, running: true };
+  State.nativeCam = cam;
+
+  const handleDecoded = (rawValue) => {
+    const text = String(rawValue || '').trim();
+    if(!text) return;
+    const now = Date.now();
+    if(scanGuard.code === text){
+      const stillInView = (now - scanGuard.lastSeen) < SCAN_CLEAR_MS;
+      scanGuard.lastSeen = now;
+      if(stillInView) return; // บาร์โค้ดเดิมยังอยู่หน้ากล้อง — ไม่นับเป็นสแกนใหม่
+    }
+    scanGuard = { code: text, lastSeen: now };
+    scanCooldown = true;
+    onDecode(text);
+    setTimeout(() => {
+      scanCooldown = false;
+      scanGuard.lastSeen = Date.now();
+    }, 1100);
+  };
+
+  const tick = async () => {
+    if(!cam.running) return;
+    try{
+      if(!scanCooldown && !document.hidden && video.readyState >= 2 && video.videoWidth){
+        const res = await detector.detect(video);
+        if(!cam.running) return;
+        if(res && res.length) handleDecoded(res[0].rawValue);
+      }
+    }catch(e){ /* เฟรมนี้ถอดไม่ได้ — ข้ามไปเฟรมถัดไป */ }
+    if(cam.running) cam.timer = setTimeout(tick, 60);
+  };
+  tick();
+  return true;
+}
+
+// render() เขียน main.innerHTML ใหม่ทุกครั้งที่สแกนสำเร็จ ซึ่งเคยทำให้กล้องถูกทำลายแล้วต้องเปิดใหม่
+// (บน iOS ช้า 1–2 วินาที) — ถอด #cam-wrap ที่กล้องกำลังเล่นอยู่ออกก่อน แล้วใส่กลับเข้าไปในหน้าใหม่
+// ใน task เดียวกัน (วิดีโอจึงไม่ถูกหยุด)
+function detachLiveCamera(){
+  const cam = State.nativeCam;
+  const wrap = document.getElementById('cam-wrap');
+  if(cam && cam.running && wrap && wrap.contains(cam.video) && wrap.parentNode){
+    wrap.parentNode.removeChild(wrap);
+    return wrap;
+  }
+  return null;
+}
+function reattachLiveCamera(kept){
+  if(!kept) return;
+  const nw = document.getElementById('cam-wrap');
+  if(!nw){
+    // หน้าใหม่ไม่มีช่องกล้อง — ปิดกล้องให้เรียบร้อยแทนปล่อยค้าง
+    stopCamera();
+    return;
+  }
+  nw.replaceWith(kept);
+  ['cam-toggle','order-cam-toggle','verify-cam-toggle'].forEach(id => {
+    const b = document.getElementById(id);
+    if(b) b.textContent = '⏹ ปิดกล้อง';
+  });
+  const v = State.nativeCam && State.nativeCam.video;
+  if(v && v.paused){ try{ v.play(); }catch(e){} }
+}
+
 async function startCamera(onDecode){
+  onDecode = onDecode || handleScan;
+  if(typeof BarcodeDetector !== 'undefined'){
+    const r = await startCameraNative(onDecode);
+    if(r === true) return true;
+    if(r === 'denied') return false;
+    // r === false → ใช้ไม่ได้ ถอยไปใช้ html5-qrcode เดิมด้านล่าง
+  }
+  return startCameraLegacy(onDecode);
+}
+
+async function startCameraLegacy(onDecode){
   onDecode = onDecode || handleScan;
   scanGuard = { code: null, lastSeen: 0 };
   const wrap = document.getElementById('cam-wrap');
@@ -2788,6 +3042,14 @@ async function stopCamera(){
   State.camActive = false;
   const wrap = document.getElementById('cam-wrap');
   if(wrap) wrap.classList.remove('active');
+  const ncam = State.nativeCam;
+  if(ncam){
+    ncam.running = false;
+    clearTimeout(ncam.timer);
+    try{ ncam.stream.getTracks().forEach(t => { try{ t.stop(); }catch(e){} }); }catch(e){}
+    try{ ncam.video.srcObject = null; ncam.video.remove(); }catch(e){}
+    State.nativeCam = null;
+  }
   if(qr){
     try{
       // บน iPhone stop() บางครั้งไม่ resolve — รอไม่เกิน 1.2 วินาที
@@ -3515,7 +3777,7 @@ function wirePrint(){
         label.appendChild(codeDiv);
         sheet.appendChild(label);
         try{
-          JsBarcode(svg, code, { format: 'CODE128', width: 1.6, height: 40, displayValue: false, margin: 2 });
+          JsBarcode(svg, code, { format: 'CODE128', width: 1.6, height: 40, displayValue: false, margin: 10 });
         }catch(e){ console.error('barcode render failed', code, e); }
       }
     });
@@ -3664,7 +3926,7 @@ function wireSets(){
         const [matchBy, matchValue] = btn.getAttribute('data-del-set').split('|');
         if(!confirm('ลบเซท "'+matchValue+'" ใช่หรือไม่?')) return;
         await sDelete(setKey(matchBy, matchValue));
-        await refreshSets();
+        await refreshSets(true);
         document.getElementById('main').innerHTML = renderSets();
         wireSets();
       };
@@ -3689,7 +3951,7 @@ function wireSets(){
         }
         upBtn.disabled = false; upBtn.textContent = '⬆ อัปโหลดไฟล์ที่กรอกแล้ว';
         upInput.value = '';
-        await refreshSets();
+        await refreshSets(true);
         document.getElementById('main').innerHTML = renderSets();
         wireSets();
       };
@@ -3831,7 +4093,7 @@ function wireSets(){
     }
     await sSetWithRetry(newKey, JSON.stringify({ matchBy, matchValue, name, components: comps }), true);
     State.setForm = null;
-    await refreshSets();
+    await refreshSets(true);
     toast('บันทึกเซทแล้ว');
     document.getElementById('main').innerHTML = renderSets();
     wireSets();
@@ -3932,6 +4194,14 @@ async function importSetsFromFile(file){
     banner.className = 'setup-banner';
     banner.innerHTML = '<b>⚠ ยังไม่ได้ตั้งค่าฐานข้อมูล</b> — ข้อมูลออเดอร์จะยังไม่ถูกบันทึก กรุณาใส่ค่า Firebase config ในไฟล์นี้ก่อนใช้งานจริง (ดูวิธีจาก Claude)';
   }
+  // อุ่นเครื่องตัวถอดรหัส WASM เบื้องหลัง (เฉพาะเครื่องที่ไม่มี BarcodeDetector ของระบบ เช่น iOS)
+  // จะได้ไม่ต้องรอโหลด ~1MB ตอนกดเปิดกล้องครั้งแรก
+  try{
+    if(typeof BarcodeDetector !== 'undefined' && String(BarcodeDetector).indexOf('[native code]') === -1){
+      const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+      new BarcodeDetector({ formats: ['code_128'] }).detect(c).catch(() => {});
+    }
+  }catch(e){}
   loadStaffName();
   if(!State.staffName) openStaffModal();
   await refreshStaffList();
