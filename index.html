@@ -272,6 +272,15 @@
 
   .order-scan-card{background:var(--surface);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1.5px solid rgba(224,138,0,.45);border-radius:20px;padding:16px;margin-bottom:16px;box-shadow:var(--glass-shadow);}
   .order-scan-card .osc-title{font-family:var(--disp);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+  .live-badge{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 10px;padding:10px 16px;border-radius:16px;background:linear-gradient(135deg,#ff1744,#d50000);color:#fff;box-shadow:0 4px 16px rgba(213,0,0,.38);}
+  .live-badge .lb-live{font-family:var(--disp);font-weight:900;font-size:40px;line-height:1;letter-spacing:3px;display:flex;align-items:center;gap:10px;}
+  .live-badge .lb-dot{width:16px;height:16px;border-radius:50%;background:#fff;animation:livepulse 1.1s ease-in-out infinite;}
+  .live-badge .lb-name{font-family:var(--mono);font-weight:700;font-size:20px;background:rgba(255,255,255,.2);padding:3px 12px;border-radius:10px;word-break:break-all;}
+  .live-badge.sm{display:inline-flex;gap:6px;margin:4px 0 0;padding:2px 9px;border-radius:8px;box-shadow:none;}
+  .live-badge.sm .lb-live{font-size:13px;letter-spacing:1px;gap:5px;}
+  .live-badge.sm .lb-dot{width:7px;height:7px;}
+  .live-badge.sm .lb-name{font-size:12px;padding:0 6px;background:rgba(255,255,255,.22);}
+  @keyframes livepulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
   .order-scan-card input[type=text]{margin-bottom:10px;font-family:var(--mono);font-size:16px;}
 
   .banner-done{
@@ -765,6 +774,11 @@ function orderInfoLine(o, fs, mt, hint){
   if(o.orderDate) parts.push('🗓 สั่งเมื่อ '+esc(o.orderDate));
   if(o.source) parts.push('🛒 สั่งจาก '+esc(o.source));
   return `<div class="muted" style="font-size:${fs}px;margin-top:${mt}px">${parts.join(' · ')}</div>`;
+}
+// ออเดอร์จากไลฟ์ = มีค่าในคอลัมน์ Creator Handle ของไฟล์ออเดอร์ → ขึ้นป้าย LIVE ใหญ่ + ชื่อครีเอเตอร์
+function liveBadgeHtml(o, small){
+  if(!o || !o.creator) return '';
+  return `<div class="live-badge${small?' sm':''}"><span class="lb-live"><span class="lb-dot"></span>LIVE</span><span class="lb-name">${esc(o.creator)}</span></div>`;
 }
 function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1594,6 +1608,7 @@ function renderStaffList(){
         <div class="meta">
           <div class="oid">${esc(o.orderId)}</div>
           <div class="cust">${esc(o.customer||'-')}</div>
+          ${liveBadgeHtml(o,true)}
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
           ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:11px;margin-top:1px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์</div>` : ''}
           ${orderInfoLine(o,11,1)}
@@ -2138,6 +2153,7 @@ function renderDetail(){
     <button class="back" id="back-btn">‹ กลับไปรายการออเดอร์</button>
     <div class="detail-header">
       <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+      ${liveBadgeHtml(o)}
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · รวม ${prog.scanned}/${prog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
@@ -2531,6 +2547,7 @@ function renderVerifyList(){
         <div class="meta">
           <div class="oid">${esc(o.orderId)}</div>
           <div class="cust">${esc(o.customer||'-')}</div>
+          ${liveBadgeHtml(o,true)}
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
           ${orderInfoLine(o,11,1)}
           ${o.packedBy ? `<div class="muted" style="font-size:11px;margin-top:1px">👤 แพ็คโดย ${esc(o.packedBy)}</div>` : ''}
@@ -2636,6 +2653,7 @@ function showVerifyPopup(order, kind){
     <div style="font-weight:700;font-size:15px;margin-bottom:2px">${title}</div>
     <div class="mono" style="font-size:13px;margin-bottom:2px">${esc(order.orderId)}</div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(order.customer||'-')}</div>
+    ${liveBadgeHtml(order)}
     ${itemLines}
   `;
   // รูปกล่องตอนแพ็คเสร็จ (พร้อมของ) — โหลดแล้วค่อยแสดงเหนือรายการ
@@ -2762,6 +2780,7 @@ function renderVerifyDetail(){
     <button class="back" id="verify-back-btn">‹ กลับไปรายการตรวจสอบ</button>
     <div class="detail-header">
       <div class="oid mono" style="font-size:20px;font-weight:700">${esc(o.orderId)}</div>
+      ${liveBadgeHtml(o)}
       <div class="muted" style="font-size:13px">${esc(o.customer||'-')} · ตรวจสอบแล้ว ${vprog.verified}/${vprog.total} ชิ้น</div>
       ${o.tracking ? `<div class="mono muted" style="font-size:12px;margin-top:2px">📦 ${esc(o.tracking)}</div>` : ''}
       ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:12px;margin-top:2px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์ในพัสดุเดียวกัน</div>` : ''}
@@ -3238,6 +3257,7 @@ function renderAdmin(){
   const optsOpt = (sel) => '<option value="-1">— ไม่ใช้ —</option>' + opts(sel);
   const gDate = guessOpt(['created time','create time','order time','order date','paid time','วันที่สั่ง','เวลาที่สั่ง','วันที่']);
   const gSource = guessOpt(['platform','channel','source','ช่องทาง','แพลตฟอร์ม']);
+  const gCreator = guessOpt(['creator handle','creator']);
   const gTrack = guess(['tracking','awb','พัสดุ','courier','เลขติดตาม','waybill']);
 
   const opts = (selectedIdx) => headers.map((h,i) => `<option value="${i}" ${i===selectedIdx?'selected':''}>${esc(h)}</option>`).join('');
@@ -3282,6 +3302,8 @@ function renderAdmin(){
       <select id="map-source">${optsOpt(gSource)}</select>
       <label>ช่องทางที่สั่ง (ใช้เมื่อไม่ได้เลือกคอลัมน์ด้านบน)</label>
       <input type="text" id="map-source-default" value="TikTok Shop" placeholder="เช่น TikTok Shop, Shopee, Lazada, LINE">
+      <label>คอลัมน์ Creator Handle (ไม่บังคับ — ถ้าช่องนี้มีชื่อ = ออเดอร์จากไลฟ์ จะขึ้นป้าย LIVE ตอนสแกน)</label>
+      <select id="map-creator">${optsOpt(gCreator)}</select>
       <div class="muted" style="font-size:12px;margin:10px 0 4px">ตัวอย่างข้อมูล</div>
       ${previewHtml}
     </div>
@@ -3396,6 +3418,9 @@ function wireAdmin(){
     const srcI = srcIdxVal==='-1' ? -1 : parseInt(srcIdxVal);
     const srcDefault = (document.getElementById('map-source-default').value || '').trim();
     const dateH = dateI>=0 ? headers[dateI] : null, srcH = srcI>=0 ? headers[srcI] : null;
+    const creatorIdxVal = document.getElementById('map-creator').value;
+    const creatorI = creatorIdxVal==='-1' ? -1 : parseInt(creatorIdxVal);
+    const creatorH = creatorI>=0 ? headers[creatorI] : null;
     const oh = headers[oi], nh = headers[ni], ch = headers[ci], qh = headers[qi], custH = custI>=0 ? headers[custI] : null, trackH = trackI>=0 ? headers[trackI] : null;
 
     const setDefs = await loadAllSetDefs();
@@ -3411,7 +3436,8 @@ function wireAdmin(){
       if(!orderIdRaw || !codeRaw){ skippedInvalid++; return; }
       const orderId = orderIdRaw;
       const code = codeRaw;
-      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH ? String(r[srcH]||'').trim() : '') || srcDefault, items: [] };
+      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH ? String(r[srcH]||'').trim() : '') || srcDefault, creator: creatorH ? String(r[creatorH]||'').trim() : '', items: [] };
+      if(creatorH && !grouped[orderId].creator){ grouped[orderId].creator = String(r[creatorH]||'').trim(); }
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
       if(isNaN(qty) || qty<=0) qty = 1;
@@ -3588,6 +3614,7 @@ function wireAdmin(){
         customer: group.map(o => o.customer).find(Boolean) || '',
         orderDate: group.map(o => o.orderDate).find(Boolean) || '',
         source: group.map(o => o.source).find(Boolean) || '',
+        creator: group.map(o => o.creator).find(Boolean) || '',
         tracking: group[0].tracking,
         originalOrderIds,
         items: mergedItems
