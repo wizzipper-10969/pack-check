@@ -280,6 +280,25 @@
   .live-badge.sm .lb-live{font-size:13px;letter-spacing:1px;gap:5px;}
   .live-badge.sm .lb-dot{width:7px;height:7px;}
   .live-badge.sm .lb-name{font-size:12px;padding:0 6px;background:rgba(255,255,255,.22);}
+  .prize-badge{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:10px 16px;border-radius:16px;background:linear-gradient(135deg,#ffd54f,#ffab00);color:#4a2c00;font-family:var(--disp);font-weight:900;font-size:28px;line-height:1.1;box-shadow:0 4px 16px rgba(255,171,0,.45);}
+  .prize-badge .pb-ic{font-size:30px;}
+  .prize-badge.sm{display:inline-flex;gap:5px;margin:4px 0 0 6px;padding:2px 9px;border-radius:8px;font-size:13px;box-shadow:none;}
+  .prize-badge.sm .pb-ic{font-size:13px;}
+  .header-actions{display:flex;gap:6px;flex-shrink:0;align-items:center;}
+  .staff-badge.prize-btn{background:linear-gradient(135deg,#ffd54f,#ffab00);color:#4a2c00;border-color:rgba(255,171,0,.6);}
+  #prize-modal .modal-card{max-height:90vh;overflow-y:auto;}
+  #prize-modal input[type=datetime-local]{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:11px 12px;border-radius:12px;font-size:15px;font-family:var(--body);margin-bottom:12px;}
+  .pz-switch{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);text-transform:none;letter-spacing:0;margin-bottom:12px;font-weight:600;}
+  .pz-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+  .pz-chips .pz-chip{display:inline-flex;align-items:center;gap:6px;margin:0;padding:6px 11px;border:1px solid var(--border);border-radius:20px;background:var(--surface2);color:var(--text);font-size:13px;text-transform:none;letter-spacing:0;cursor:pointer;font-family:var(--mono);}
+  .pz-chips .pz-chip.on{background:#ffab00;border-color:#ffab00;color:#4a2c00;font-weight:700;}
+  .pz-chips .pz-chip input{margin:0;}
+  .pz-chips .pz-empty{font-size:12px;color:var(--muted);}
+  .pz-addrow{display:flex;gap:8px;margin-bottom:12px;}
+  .pz-addrow input{margin-bottom:0;flex:1;}
+  .pz-addrow .btn{width:auto;flex-shrink:0;padding:0 14px;}
+  .pz-count{font-size:13px;font-weight:600;padding:9px 12px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);margin-bottom:12px;}
+  .pz-count.warn{color:var(--warn);}
   @keyframes livepulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
   .order-scan-card input[type=text]{margin-bottom:10px;font-family:var(--mono);font-size:16px;}
 
@@ -429,7 +448,10 @@
   <header class="top">
     <div class="brand-row">
       <div class="brand"><span class="dot"></span>PackCheck<span class="by">by Wiz Zipper</span></div>
-      <button id="staff-badge" class="staff-badge">👤 <span id="staff-badge-name">ตั้งชื่อ</span></button>
+      <div class="header-actions">
+        <button id="prize-badge" class="staff-badge prize-btn">🎁 <span>ลุ้นรางวัล</span></button>
+        <button id="staff-badge" class="staff-badge">👤 <span id="staff-badge-name">ตั้งชื่อ</span></button>
+      </div>
     </div>
     <div class="sub">เช็คสแกนสินค้าก่อนแพ็คส่ง — กันของผิด กันแพ็คตก</div>
   </header>
@@ -453,6 +475,30 @@
       <div class="row">
         <button class="btn secondary" id="staff-modal-skip">ข้ามไปก่อน</button>
         <button class="btn" id="staff-modal-save">บันทึก</button>
+      </div>
+    </div>
+  </div>
+  <div id="prize-modal" class="modal-overlay">
+    <div class="modal-card wide">
+      <div class="modal-title">🎁 ตั้งค่าลุ้นรางวัล</div>
+      <div class="modal-desc">ออเดอร์ที่สั่งจากไลฟ์ตามเงื่อนไขด้านล่าง จะขึ้นป้าย "ได้ลุ้นรางวัล" ตอนสแกน — เลือกช่วงเวลาที่สั่ง แล้วติ๊กไลฟ์ที่เข้าร่วม</div>
+      <label class="pz-switch"><input type="checkbox" id="pz-enabled"> เปิดใช้งานแคมเปญลุ้นรางวัล</label>
+      <div class="row">
+        <div><label>สั่งตั้งแต่</label><input type="datetime-local" id="pz-start"></div>
+        <div><label>ถึง</label><input type="datetime-local" id="pz-end"></div>
+      </div>
+      <label>ไลฟ์ของใครที่เข้าร่วม (Creator Handle)</label>
+      <div id="pz-creators" class="pz-chips"></div>
+      <div class="pz-addrow"><input type="text" id="pz-creator-new" placeholder="เพิ่มชื่อไลฟ์เอง เช่น maphway8" autocomplete="off"><button class="btn secondary" id="pz-creator-add">+ เพิ่ม</button></div>
+      <label>สั่งจากที่ไหน (ช่องทาง)</label>
+      <div id="pz-sources" class="pz-chips"></div>
+      <div class="pz-addrow"><input type="text" id="pz-source-new" placeholder="เพิ่มช่องทางเอง เช่น TikTok Shop" autocomplete="off"><button class="btn secondary" id="pz-source-add">+ เพิ่ม</button></div>
+      <div class="muted" style="font-size:12px;margin:-4px 0 10px">ไม่ติ๊กช่องทางเลย = ไม่จำกัดช่องทาง</div>
+      <button class="btn secondary" id="pz-load-more" style="width:100%;margin-bottom:10px">🔄 ดึงรายชื่อไลฟ์/ช่องทางจากออเดอร์ย้อนหลัง 7 วัน</button>
+      <div id="pz-count" class="pz-count"></div>
+      <div class="row">
+        <button class="btn secondary" id="pz-cancel">ยกเลิก</button>
+        <button class="btn" id="pz-save">บันทึก</button>
       </div>
     </div>
   </div>
@@ -778,7 +824,9 @@ function orderInfoLine(o, fs, mt, hint){
 // ออเดอร์จากไลฟ์ = มีค่าในคอลัมน์ Creator Handle ของไฟล์ออเดอร์ → ขึ้นป้าย LIVE ใหญ่ + ชื่อครีเอเตอร์
 function liveBadgeHtml(o, small){
   if(!o || !o.creator) return '';
-  return `<div class="live-badge${small?' sm':''}"><span class="lb-live"><span class="lb-dot"></span>LIVE</span><span class="lb-name">${esc(o.creator)}</span></div>`;
+  const live = `<div class="live-badge${small?' sm':''}"><span class="lb-live"><span class="lb-dot"></span>LIVE</span><span class="lb-name">${esc(o.creator)}</span></div>`;
+  const prize = prizeEligible(o) ? `<div class="prize-badge${small?' sm':''}"><span class="pb-ic">🎁</span><span>ได้ลุ้นรางวัล</span></div>` : '';
+  return live + prize;
 }
 function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1098,7 +1146,10 @@ const State = {
   boxPhotoCache: {}, // 'date:orderId' -> dataURL or null — the packed-box evidence photo
   pendingCloseOrder: null, // order currently shown in the box-photo modal
   pendingBoxPhotoDataUrl: null, // photo captured in the modal but not yet saved
-  boxPhotoAutoClose: false // whether confirming/skipping the modal should also navigate back to the order list
+  boxPhotoAutoClose: false, // whether confirming/skipping the modal should also navigate back to the order list
+  prizeCfg: null, // {enabled,start,end,creators[],sources[]} — ตั้งค่าลุ้นรางวัล (แชร์ทุกเครื่อง)
+  prizeCfgAt: 0,
+  prizeDraft: null
 
 };
 
@@ -1492,6 +1543,7 @@ document.getElementById('tab-sets').onclick = () => setTab('sets');
 
 async function render(){
   const main = document.getElementById('main');
+  await loadPrizeConfig();
   if(State.view==='admin'){
     main.innerHTML = renderAdmin();
     wireAdmin();
@@ -3701,6 +3753,192 @@ function wireAdmin(){
     setTab('staff');
   };
 }
+
+/* ============ PRIZE CAMPAIGN (ลุ้นรางวัล) ============ */
+const PRIZE_KEY = 'config:prize';
+const PRIZE_TTL_MS = 60000;
+async function loadPrizeConfig(force){
+  if(!force && State.prizeCfgAt && Date.now() - State.prizeCfgAt < PRIZE_TTL_MS) return State.prizeCfg;
+  try{
+    const raw = await sGet(PRIZE_KEY, true);
+    State.prizeCfg = raw ? JSON.parse(raw) : null;
+  }catch(e){ /* keep the previous value */ }
+  State.prizeCfgAt = Date.now();
+  return State.prizeCfg;
+}
+// วันที่สั่งในออเดอร์เป็นข้อความ (วัน/เดือน/ปี เวลา) — แปลงเป็น Date; อ่านไม่ได้ = null
+function parseOrderDateTime(v){
+  if(!v) return null;
+  const str = String(v).trim();
+  let y, mo, d, h = 0, mi = 0, se = 0, m;
+  m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  if(m){
+    d = +m[1]; mo = +m[2]; y = +m[3];
+    if(m[4] != null){
+      h = +m[4]; mi = +m[5]; se = +(m[6] || 0);
+      if(m[7]){ const pm = m[7].toUpperCase() === 'PM'; if(pm && h < 12) h += 12; if(!pm && h === 12) h = 0; }
+    }
+  } else {
+    m = str.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if(!m) return null;
+    y = +m[1]; mo = +m[2]; d = +m[3];
+    if(m[4] != null){ h = +m[4]; mi = +m[5]; se = +(m[6] || 0); }
+  }
+  if(y > 2400) y -= 543; // ปี พ.ศ.
+  const dt = new Date(y, mo - 1, d, h, mi, se);
+  return isNaN(dt) ? null : dt;
+}
+function parseCfgDT(v){ // 'YYYY-MM-DDTHH:mm' จากช่อง datetime-local
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0) : null;
+}
+function normHandle(x){ return String(x || '').trim().toLowerCase(); }
+function prizeEligibleWith(o, cfg){
+  if(!cfg || !cfg.enabled || !o || !o.creator) return false;
+  const creators = (cfg.creators || []).map(normHandle);
+  if(!creators.includes(normHandle(o.creator))) return false;
+  const sources = (cfg.sources || []).map(normHandle);
+  if(sources.length && !sources.includes(normHandle(o.source))) return false;
+  const st = parseCfgDT(cfg.start), en = parseCfgDT(cfg.end);
+  if(!st || !en) return false;
+  const t = parseOrderDateTime(o.orderDate);
+  if(!t) return false;
+  return t.getTime() >= st.getTime() && t.getTime() <= en.getTime() + 59999; // นับถึงนาทีสุดท้ายของเวลาสิ้นสุด
+}
+function prizeEligible(o){ return prizeEligibleWith(o, State.prizeCfg); }
+
+function prizeCollectOptions(orders){
+  const d = State.prizeDraft;
+  (orders || []).forEach(o => {
+    if(o.creator && !d.knownCreators.some(x => normHandle(x) === normHandle(o.creator))) d.knownCreators.push(o.creator);
+    if(o.source && !d.knownSources.some(x => normHandle(x) === normHandle(o.source))) d.knownSources.push(o.source);
+  });
+}
+function prizeRenderChips(){
+  const d = State.prizeDraft;
+  const mk = (kind, known, selected) => {
+    const all = [...known];
+    selected.forEach(x => { if(!all.some(k => normHandle(k) === normHandle(x))) all.push(x); });
+    if(!all.length) return '<span class="pz-empty">ยังไม่มีรายชื่อ — เพิ่มเองด้านล่าง หรือกดดึงจากออเดอร์</span>';
+    return all.map(x => {
+      const on = selected.some(sx => normHandle(sx) === normHandle(x));
+      return `<label class="pz-chip${on?' on':''}"><input type="checkbox" data-pzkind="${kind}" value="${esc(x)}" ${on?'checked':''}>${esc(x)}</label>`;
+    }).join('');
+  };
+  document.getElementById('pz-creators').innerHTML = mk('creator', d.knownCreators, d.creators);
+  document.getElementById('pz-sources').innerHTML = mk('source', d.knownSources, d.sources);
+  document.querySelectorAll('#prize-modal input[data-pzkind]').forEach(cb => {
+    cb.onchange = () => {
+      const list = cb.dataset.pzkind === 'creator' ? d.creators : d.sources;
+      const i = list.findIndex(x => normHandle(x) === normHandle(cb.value));
+      if(cb.checked && i < 0) list.push(cb.value);
+      if(!cb.checked && i >= 0) list.splice(i, 1);
+      prizeRenderChips();
+      prizeRenderCount();
+    };
+  });
+}
+function prizeDraftCfg(){
+  const d = State.prizeDraft;
+  return { enabled: document.getElementById('pz-enabled').checked, start: document.getElementById('pz-start').value, end: document.getElementById('pz-end').value, creators: d.creators, sources: d.sources };
+}
+function prizeRenderCount(){
+  const el = document.getElementById('pz-count');
+  const cfg = prizeDraftCfg();
+  const st = parseCfgDT(cfg.start), en = parseCfgDT(cfg.end);
+  let msg = '', warn = false;
+  if(!cfg.creators.length){ msg = '⚠ ยังไม่ได้เลือกไลฟ์ที่เข้าร่วม — ตอนนี้จะไม่มีออเดอร์ไหนได้ลุ้นรางวัล'; warn = true; }
+  else if(!st || !en){ msg = '⚠ ยังไม่ได้เลือกช่วงเวลา (ตั้งแต่ – ถึง)'; warn = true; }
+  else if(en < st){ msg = '⚠ เวลาสิ้นสุดต้องไม่ก่อนเวลาเริ่ม'; warn = true; }
+  else {
+    const list = State.orders || [];
+    const n = list.filter(o => prizeEligibleWith(o, Object.assign({}, cfg, { enabled: true }))).length;
+    const live = list.filter(o => o.creator).length;
+    const noTime = list.filter(o => o.creator && !parseOrderDateTime(o.orderDate)).length;
+    msg = `ออเดอร์วันที่ ${fmtDateTH(State.date)}: เข้าเงื่อนไข ${n} ใบ (จากออเดอร์ไลฟ์ ${live} ใบ ทั้งหมด ${list.length} ใบ)` + (noTime ? ` · ⚠ ${noTime} ใบไม่มีเวลาสั่ง` : '');
+  }
+  el.textContent = msg;
+  el.classList.toggle('warn', warn);
+}
+function openPrizeModal(){
+  const c = State.prizeCfg || {};
+  State.prizeDraft = {
+    creators: [...(c.creators || [])], sources: [...(c.sources || [])],
+    knownCreators: [...(c.knownCreators || [])], knownSources: [...(c.knownSources || [])]
+  };
+  prizeCollectOptions(State.orders);
+  document.getElementById('pz-enabled').checked = !!c.enabled;
+  document.getElementById('pz-start').value = c.start || '';
+  document.getElementById('pz-end').value = c.end || '';
+  document.getElementById('pz-creator-new').value = '';
+  document.getElementById('pz-source-new').value = '';
+  prizeRenderChips();
+  prizeRenderCount();
+  document.getElementById('prize-modal').classList.add('show');
+}
+function closePrizeModal(){ document.getElementById('prize-modal').classList.remove('show'); }
+function prizeAddManual(kind){
+  const inp = document.getElementById(kind === 'creator' ? 'pz-creator-new' : 'pz-source-new');
+  const v = inp.value.trim();
+  if(!v) return;
+  const d = State.prizeDraft;
+  const known = kind === 'creator' ? d.knownCreators : d.knownSources;
+  const sel = kind === 'creator' ? d.creators : d.sources;
+  if(!known.some(x => normHandle(x) === normHandle(v))) known.push(v);
+  if(!sel.some(x => normHandle(x) === normHandle(v))) sel.push(v);
+  inp.value = '';
+  prizeRenderChips();
+  prizeRenderCount();
+}
+async function prizeLoadRecent(){
+  const btn = document.getElementById('pz-load-more');
+  btn.disabled = true; btn.textContent = '⏳ กำลังดึงข้อมูล...';
+  try{
+    await loadDateIndex();
+    const dates = (State.dates || []).slice(0, 7);
+    for(const dt of dates){
+      const entries = await getExistingOrderEntries(dt);
+      const orders = [];
+      entries.forEach(en => { try{ if(en.value) orders.push(JSON.parse(en.value)); }catch(e){} });
+      prizeCollectOptions(orders);
+    }
+    prizeRenderChips();
+    prizeRenderCount();
+    toast('ดึงรายชื่อจากออเดอร์ '+dates.length+' วันล่าสุดแล้ว');
+  }catch(e){
+    toast('ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
+  }
+  btn.disabled = false; btn.textContent = '🔄 ดึงรายชื่อไลฟ์/ช่องทางจากออเดอร์ย้อนหลัง 7 วัน';
+}
+async function savePrizeConfig(){
+  const cfg = prizeDraftCfg();
+  const st = parseCfgDT(cfg.start), en = parseCfgDT(cfg.end);
+  if(cfg.enabled && (!st || !en)){ toast('กรุณาเลือกช่วงเวลาที่สั่ง (ตั้งแต่ – ถึง) ให้ครบ'); return; }
+  if(cfg.enabled && st && en && en < st){ toast('เวลาสิ้นสุดต้องไม่ก่อนเวลาเริ่ม'); return; }
+  if(cfg.enabled && !cfg.creators.length){ toast('กรุณาเลือกไลฟ์ที่เข้าร่วมอย่างน้อย 1 ราย'); return; }
+  cfg.knownCreators = State.prizeDraft.knownCreators;
+  cfg.knownSources = State.prizeDraft.knownSources;
+  const btn = document.getElementById('pz-save');
+  btn.disabled = true; btn.textContent = 'กำลังบันทึก...';
+  const ok = await sSetWithRetry(PRIZE_KEY, JSON.stringify(cfg), true);
+  btn.disabled = false; btn.textContent = 'บันทึก';
+  if(ok === false || ok === null){ toast('บันทึกไม่สำเร็จ — ตรวจอินเทอร์เน็ต/Firebase แล้วลองใหม่'); return; }
+  State.prizeCfg = cfg;
+  State.prizeCfgAt = Date.now();
+  closePrizeModal();
+  toast(cfg.enabled ? 'บันทึกเงื่อนไขลุ้นรางวัลแล้ว' : 'บันทึกแล้ว (ปิดแคมเปญอยู่)');
+  render();
+}
+document.getElementById('prize-badge').onclick = openPrizeModal;
+document.getElementById('pz-cancel').onclick = closePrizeModal;
+document.getElementById('pz-save').onclick = savePrizeConfig;
+document.getElementById('pz-load-more').onclick = prizeLoadRecent;
+document.getElementById('pz-creator-add').onclick = () => prizeAddManual('creator');
+document.getElementById('pz-source-add').onclick = () => prizeAddManual('source');
+document.getElementById('pz-creator-new').onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); prizeAddManual('creator'); } };
+document.getElementById('pz-source-new').onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); prizeAddManual('source'); } };
+document.getElementById('pz-start').onchange = prizeRenderCount;
+document.getElementById('pz-end').onchange = prizeRenderCount;
 
 /* ============ PRINT BARCODE LABELS ============ */
 function renderPrint(){
