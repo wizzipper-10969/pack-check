@@ -287,6 +287,8 @@
   .header-actions{display:flex;gap:6px;flex-shrink:0;align-items:center;}
   .staff-badge.prize-btn{background:linear-gradient(135deg,#ffd54f,#ffab00);color:#4a2c00;border-color:rgba(255,171,0,.6);}
   #prize-modal .modal-card{max-height:90vh;overflow-y:auto;}
+  #prize-modal .row > div{min-width:0;}
+  #prize-modal input[type=datetime-local]{min-width:0;box-sizing:border-box;}
   #prize-modal input[type=datetime-local]{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:11px 12px;border-radius:12px;font-size:15px;font-family:var(--body);margin-bottom:12px;}
   .pz-switch{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text);text-transform:none;letter-spacing:0;margin-bottom:12px;font-weight:600;}
   .pz-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
@@ -812,19 +814,29 @@ function normOrderDate(v){
   }
   return String(v).trim();
 }
+function isNumericLike(v){ return /^[\d\s.,\-+%฿]+$/.test(String(v==null?'':v).trim()); }
 function orderInfoLine(o, fs, mt, hint){
   if(!o.orderDate && !o.source){
     return hint ? `<div style="font-size:${fs}px;margin-top:${mt}px;color:var(--warn)">⚠ ออเดอร์นี้ยังไม่มีข้อมูลวันที่สั่ง/ช่องทาง — อัปโหลดไฟล์ออเดอร์ซ้ำ (เลือกจับคู่คอลัมน์วันที่สั่ง) เพื่อเติมข้อมูล</div>` : '';
   }
   const parts=[];
   if(o.orderDate) parts.push('🗓 สั่งเมื่อ '+esc(o.orderDate));
-  if(o.source) parts.push('🛒 สั่งจาก '+esc(o.source));
+  if(o.source && !isNumericLike(o.source)) parts.push('🛒 สั่งจาก '+esc(o.source));
   return `<div class="muted" style="font-size:${fs}px;margin-top:${mt}px">${parts.join(' · ')}</div>`;
 }
 // ออเดอร์จากไลฟ์ = มีค่าในคอลัมน์ Creator Handle ของไฟล์ออเดอร์ → ขึ้นป้าย LIVE ใหญ่ + ชื่อครีเอเตอร์
+// ออเดอร์จากไลฟ์: ถ้าไฟล์มีคอลัมน์ Order Channel → นับเฉพาะ "LIVE" (Videos / Product cards ไม่ใช่ไลฟ์ แม้จะมี Creator Handle)
+// ถ้าไม่มีข้อมูลช่องทางแบบนั้น → ใช้ Creator Handle อย่างเดียวเหมือนเดิม
+function isLiveOrder(o){
+  if(!o) return false;
+  const ch = String(o.source || '').trim().toLowerCase();
+  if(ch === 'live') return true;
+  if(ch === 'videos' || ch === 'video' || ch === 'product cards' || ch === 'product card' || ch === 'showcase') return false;
+  return !!o.creator;
+}
 function liveBadgeHtml(o, small){
-  if(!o || !o.creator) return '';
-  const live = `<div class="live-badge${small?' sm':''}"><span class="lb-live"><span class="lb-dot"></span>LIVE</span><span class="lb-name">${esc(o.creator)}</span></div>`;
+  if(!isLiveOrder(o)) return '';
+  const live = `<div class="live-badge${small?' sm':''}"><span class="lb-live"><span class="lb-dot"></span>LIVE</span>${o.creator ? `<span class="lb-name">${esc(o.creator)}</span>` : ''}</div>`;
   const prize = prizeEligible(o) ? `<div class="prize-badge${small?' sm':''}"><span class="pb-ic">🎁</span><span>ได้ลุ้นรางวัล</span></div>` : '';
   return live + prize;
 }
@@ -3308,7 +3320,20 @@ function renderAdmin(){
   };
   const optsOpt = (sel) => '<option value="-1">— ไม่ใช้ —</option>' + opts(sel);
   const gDate = guessOpt(['created time','create time','order time','order date','paid time','วันที่สั่ง','เวลาที่สั่ง','วันที่']);
-  const gSource = guessOpt(['platform','channel','source','ช่องทาง','แพลตฟอร์ม']);
+  const gSource = (() => {
+    // เลี่ยงคอลัมน์ตัวเลข/ราคา เช่น "SKU Platform Discount" ที่ชื่อมีคำว่า platform แต่ข้อมูลเป็นตัวเลข
+    const badName = /discount|fee|price|amount|commission|coupon|voucher|rebate|cost|tax|ส่วนลด|ค่า|ราคา/i;
+    const sample = rows.slice(skipRows||0, (skipRows||0)+30);
+    for(const k of ['order channel','channel','platform','source','ช่องทาง','แพลตฟอร์ม']){
+      for(let i=0;i<headers.length;i++){
+        const h = headers[i];
+        if(!String(h).toLowerCase().includes(k) || badName.test(h)) continue;
+        const vals = sample.map(r => String(r[h]==null?'':r[h]).trim()).filter(Boolean);
+        if(vals.length && vals.every(v => !isNumericLike(v))) return i;
+      }
+    }
+    return -1;
+  })();
   const gCreator = guessOpt(['creator handle','creator']);
   const gTrack = guess(['tracking','awb','พัสดุ','courier','เลขติดตาม','waybill']);
 
@@ -3488,7 +3513,7 @@ function wireAdmin(){
       if(!orderIdRaw || !codeRaw){ skippedInvalid++; return; }
       const orderId = orderIdRaw;
       const code = codeRaw;
-      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH ? String(r[srcH]||'').trim() : '') || srcDefault, creator: creatorH ? String(r[creatorH]||'').trim() : '', items: [] };
+      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH && !isNumericLike(r[srcH]) ? String(r[srcH]||'').trim() : '') || srcDefault, creator: creatorH ? String(r[creatorH]||'').trim() : '', items: [] };
       if(creatorH && !grouped[orderId].creator){ grouped[orderId].creator = String(r[creatorH]||'').trim(); }
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
@@ -3794,7 +3819,7 @@ function parseCfgDT(v){ // 'YYYY-MM-DDTHH:mm' จากช่อง datetime-loc
 }
 function normHandle(x){ return String(x || '').trim().toLowerCase(); }
 function prizeEligibleWith(o, cfg){
-  if(!cfg || !cfg.enabled || !o || !o.creator) return false;
+  if(!cfg || !cfg.enabled || !o || !o.creator || !isLiveOrder(o)) return false;
   const creators = (cfg.creators || []).map(normHandle);
   if(!creators.includes(normHandle(o.creator))) return false;
   const sources = (cfg.sources || []).map(normHandle);
@@ -3811,7 +3836,7 @@ function prizeCollectOptions(orders){
   const d = State.prizeDraft;
   (orders || []).forEach(o => {
     if(o.creator && !d.knownCreators.some(x => normHandle(x) === normHandle(o.creator))) d.knownCreators.push(o.creator);
-    if(o.source && !d.knownSources.some(x => normHandle(x) === normHandle(o.source))) d.knownSources.push(o.source);
+    if(o.source && !isNumericLike(o.source) && !d.knownSources.some(x => normHandle(x) === normHandle(o.source))) d.knownSources.push(o.source);
   });
 }
 function prizeRenderChips(){
@@ -4584,6 +4609,9 @@ async function importSetsFromFile(file){
 
 /* ============ INIT ============ */
 (async function init(){
+  // #app มี backdrop-filter ทำให้ position:fixed ของหน้าต่างป๊อปอัปอิงตาม #app (ซึ่งสูงมากเมื่อมีออเดอร์เยอะ) → หน้าต่างไปอยู่นอกจอ
+  // ย้ายหน้าต่างทั้งหมดไปไว้ใต้ <body> ตรงๆ ให้อิงตามหน้าจอจริง
+  document.querySelectorAll('.modal-overlay').forEach(el => document.body.appendChild(el));
   const banner = document.getElementById('setup-banner');
   if(!backendReady){
     banner.className = 'setup-banner';
