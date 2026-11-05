@@ -301,6 +301,8 @@
   .pz-addrow .btn{width:auto;flex-shrink:0;padding:0 14px;}
   .pz-count{font-size:13px;font-weight:600;padding:9px 12px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);margin-bottom:12px;}
   .pz-count.warn{color:var(--warn);}
+.gift-tag{display:inline-block;background:#ffab00;color:#4a2c00;font-size:11px;font-weight:700;padding:1px 7px;border-radius:8px;margin-right:6px;vertical-align:middle;font-family:var(--body);}
+  .item-row.gift{box-shadow:inset 4px 0 0 #ffab00;}
   @keyframes livepulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
   .order-scan-card input[type=text]{margin-bottom:10px;font-family:var(--mono);font-size:16px;}
 
@@ -531,7 +533,7 @@
   </div>
   <div id="product-picker-modal" class="modal-overlay">
     <div class="modal-card">
-      <div class="modal-title">🔍 เลือกสินค้า</div>
+      <div class="modal-title" id="pp-title">🔍 เลือกสินค้า</div>
       <input type="text" id="pp-search" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." autocomplete="off">
       <div id="pp-list"></div>
       <button class="pp-manual-link" id="pp-manual-toggle">หาไม่เจอ? + เพิ่มสินค้าใหม่ด้วยตนเอง</button>
@@ -1966,7 +1968,7 @@ async function exportStockReport(date, orders, withPhotos){
     o.items.forEach(it => {
       const req = it.qtyRequired||0, scanned = it.qtyScanned||0;
       const itemStatus = o.cancelled ? 'ยกเลิก' : (scanned>=req && req>0 ? 'ครบแล้ว' : (scanned>0 ? 'บางส่วน' : 'ยังไม่แพ็ค'));
-      itemDetailData.push([o.orderId, o.customer||'-', o.tracking||'-', it.code, it.name||it.code, req, scanned, itemStatus, o.packedBy||'-']);
+      itemDetailData.push([o.orderId, o.customer||'-', o.tracking||'-', it.code, (it.gift ? '[ของแถม] ' : '')+(it.name||it.code), req, scanned, itemStatus, o.packedBy||'-']);
     });
   });
 
@@ -2165,11 +2167,11 @@ function renderDetail(){
     const over = it.qtyScanned > it.qtyRequired;
     const photo = State.photoCache[it.code];
     const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : `<div class="item-photo" style="display:flex;align-items:center;justify-content:center;font-size:26px">🏷️</div>`;
-    return `<div class="item-row ${done?'done':''}">
+    return `<div class="item-row ${done?'done':''}${it.gift?' gift':''}">
       <div class="check">${done?'✓':''}</div>
       ${photoHtml}
       <div class="item-info">
-        <div class="name">${esc(it.name)}</div>
+        <div class="name">${it.gift?'<span class="gift-tag">🎁 ของแถม</span>':''}${esc(it.name)}</div>
         <div class="code">${esc(it.code)}</div>
       </div>
       <div class="item-qty ${over?'over':''}">${it.qtyScanned}/${it.qtyRequired}</div>
@@ -2227,6 +2229,7 @@ function renderDetail(){
         <button class="btn secondary" id="edit-order-btn">✏️ แก้ไขออเดอร์</button>
         ${cancelBtnHtml}
       </div>
+      ${st==='cancelled' ? '' : `<button class="btn secondary" id="add-gift-btn" style="margin-top:10px;width:100%;border-color:#ffab00">🎁 เพิ่มของแถม</button>`}
     </div>
     ${doneBanner}
     ${cancelledBanner}
@@ -2274,6 +2277,8 @@ function wireDetail(){
 
   const editBtn = document.getElementById('edit-order-btn');
   if(editBtn) editBtn.onclick = openEditOrderModal;
+  const giftBtn = document.getElementById('add-gift-btn');
+  if(giftBtn) giftBtn.onclick = openGiftPicker;
 
   const cancelBtn = document.getElementById('cancel-order-btn');
   if(cancelBtn){
@@ -2402,7 +2407,7 @@ async function openEditOrderModal(){
   const o = State.currentOrder;
   if(!o) return;
   // deep-copy so cancel doesn't touch the live order
-  State.editOrderDraft = o.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned }));
+  State.editOrderDraft = o.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned, gift: !!it.gift }));
   renderEditOrderList();
   document.getElementById('edit-order-modal').classList.add('show');
   // refresh the product catalog in the background so the picker has the latest list
@@ -2422,7 +2427,7 @@ function renderEditOrderList(){
     const photo = it.code ? State.photoCache[it.code] : null;
     const thumbHtml = photo ? `<img class="thumb" src="${photo}">` : `<div class="thumb-placeholder">🏷️</div>`;
     const infoHtml = hasProduct
-      ? `<div class="eo-info" data-eo-pick="${idx}"><div class="eo-name">${esc(it.name||it.code)}</div><div class="eo-code">${esc(it.code)}</div></div>`
+      ? `<div class="eo-info" data-eo-pick="${idx}"><div class="eo-name">${it.gift?'<span class="gift-tag">🎁 ของแถม</span>':''}${esc(it.name||it.code)}</div><div class="eo-code">${esc(it.code)}</div></div>`
       : `<div class="eo-info eo-empty" data-eo-pick="${idx}"><div class="eo-name">แตะเพื่อเลือกสินค้า...</div></div>`;
     return `<div class="eo-row" data-eo-idx="${idx}">
       ${thumbHtml}
@@ -2459,7 +2464,7 @@ async function saveEditOrder(){
   const draft = State.editOrderDraft || [];
   const withProduct = draft.filter(it => it.code && it.code.trim());
   if(withProduct.length !== draft.length){ toast('มีรายการที่ยังไม่ได้เลือกสินค้า กรุณาเลือกให้ครบ หรือลบแถวที่ไม่ใช้ออก'); return; }
-  const cleaned = withProduct.map(it => ({ code: it.code.trim(), name: (it.name||it.code).trim(), qtyRequired: Math.max(1, parseInt(it.qtyRequired)||1) }));
+  const cleaned = withProduct.map(it => ({ code: it.code.trim(), name: (it.name||it.code).trim(), qtyRequired: Math.max(1, parseInt(it.qtyRequired)||1), gift: !!it.gift }));
   if(cleaned.length === 0){ toast('ต้องมีอย่างน้อย 1 รายการสินค้าในออเดอร์'); return; }
   const codes = cleaned.map(it => it.code.toLowerCase());
   const dupes = codes.filter((c, i) => codes.indexOf(c) !== i);
@@ -2472,7 +2477,9 @@ async function saveEditOrder(){
     const prev = prevByCode[it.code.toLowerCase()];
     // keep progress already scanned for a code that still exists, but never let it exceed the (possibly new) qty required
     const qtyScanned = prev ? Math.min(prev.qtyScanned||0, it.qtyRequired) : 0;
-    return { code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned };
+    const out = { code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned };
+    if(it.gift) out.gift = true;
+    return out;
   });
   // mark this order as manually edited so a future re-upload of the order file (which
   // only knows the ORIGINAL uploaded items) doesn't silently overwrite the customer's
@@ -2486,7 +2493,8 @@ async function saveEditOrder(){
 
 /* ---- product picker (choose from the existing product catalog instead of typing SKU/name) ---- */
 function openProductPicker(targetIdx){
-  State.productPickerTarget = targetIdx; // number = replace that row in editOrderDraft, 'new' = append a row
+  State.productPickerTarget = targetIdx; // number = replace that row in editOrderDraft, 'new' = append a row, 'gift' = add a free gift to the open order
+  document.getElementById('pp-title').textContent = targetIdx === 'gift' ? '🎁 เลือกของแถม' : '🔍 เลือกสินค้า';
   const search = document.getElementById('pp-search');
   search.value = '';
   document.getElementById('pp-manual-form').style.display = 'none';
@@ -2526,8 +2534,35 @@ function renderProductPickerList(q){
   });
 }
 
+function openGiftPicker(){
+  const o = State.currentOrder;
+  if(!o || orderStatus(o)==='cancelled') return;
+  openProductPicker('gift');
+  // refresh the catalog in the background so the picker has the latest list
+  refreshPrintCodes().then(() => {
+    if(State.productPickerTarget === 'gift') renderProductPickerList(document.getElementById('pp-search').value);
+  }).catch(()=>{});
+}
+async function addGiftItem(code, name){
+  const o = State.currentOrder;
+  if(!o) return;
+  const ex = o.items.find(it => String(it.code).toLowerCase() === String(code).toLowerCase());
+  if(ex && !ex.gift){ toast('สินค้านี้มีอยู่ในออเดอร์แล้ว — ถ้าจะเพิ่มจำนวน ใช้ปุ่ม "แก้ไขออเดอร์"'); return; }
+  if(ex && ex.gift) ex.qtyRequired = (ex.qtyRequired||0) + 1;
+  else o.items.push({ code, name: name||code, qtyRequired: 1, qtyScanned: 0, gift: true });
+  // กันไม่ให้การอัปโหลดไฟล์ออเดอร์ซ้ำมาลบของแถมทิ้ง
+  o.itemsManuallyEdited = true;
+  await saveOrder(State.date, o);
+  toast('🎁 เพิ่มของแถมแล้ว: '+(name||code)+(ex && ex.gift ? ' (x'+ex.qtyRequired+')' : ''));
+  render();
+}
 function selectProduct(code, name){
   const idx = State.productPickerTarget;
+  if(idx === 'gift'){
+    closeProductPicker();
+    addGiftItem(code, name);
+    return;
+  }
   if(idx === 'new'){
     State.editOrderDraft.push({ code, name: name||code, qtyRequired: 1, qtyScanned: 0 });
   } else if(typeof idx === 'number' && State.editOrderDraft[idx]){
@@ -2816,11 +2851,11 @@ function renderVerifyDetail(){
     const over = qv > it.qtyRequired;
     const photo = State.photoCache[it.code];
     const photoHtml = photo ? `<img class="item-photo" src="${photo}">` : `<div class="item-photo" style="display:flex;align-items:center;justify-content:center;font-size:26px">🏷️</div>`;
-    return `<div class="item-row ${done?'done':''}">
+    return `<div class="item-row ${done?'done':''}${it.gift?' gift':''}">
       <div class="check">${done?'✓':''}</div>
       ${photoHtml}
       <div class="item-info">
-        <div class="name">${esc(it.name)}</div>
+        <div class="name">${it.gift?'<span class="gift-tag">🎁 ของแถม</span>':''}${esc(it.name)}</div>
         <div class="code">${esc(it.code)}</div>
       </div>
       <div class="item-qty ${over?'over':''}">${qv}/${it.qtyRequired}</div>
@@ -3733,8 +3768,15 @@ function wireAdmin(){
       // manually edited — keep the edited item list itself, not just its scanned
       // progress, so the swap isn't reverted by this re-upload
       if(prev && prev.itemsManuallyEdited && Array.isArray(prev.items) && !order.originalOrderIds){
-        order.items = prev.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned, qtyVerified: it.qtyVerified || 0 }));
+        order.items = prev.items.map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired, qtyScanned: it.qtyScanned, qtyVerified: it.qtyVerified || 0, ...(it.gift ? { gift: true } : {}) }));
         order.itemsManuallyEdited = true;
+      }
+      // ของแถมที่เพิ่มมือไว้ในออเดอร์ ต้องอยู่ต่อแม้อัปโหลดไฟล์ซ้ำ (รวมกรณีรวมออเดอร์ในพัสดุเดียวกัน)
+      if(prev && Array.isArray(prev.items)){
+        prev.items.filter(pi => pi.gift).forEach(pi => {
+          if(!order.items.some(it => it.code === pi.code)) order.items.push({ code: pi.code, name: pi.name, qtyRequired: pi.qtyRequired, qtyScanned: 0, gift: true });
+        });
+        if(prev.items.some(pi => pi.gift)) order.itemsManuallyEdited = true;
       }
       if(prev && Array.isArray(prev.items)){
         let anyRestored = false;
