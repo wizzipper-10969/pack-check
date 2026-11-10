@@ -303,6 +303,17 @@
   .pz-count.warn{color:var(--warn);}
 .gift-tag{display:inline-block;background:#ffab00;color:#4a2c00;font-size:11px;font-weight:700;padding:1px 7px;border-radius:8px;margin-right:6px;vertical-align:middle;font-family:var(--body);}
   .item-row.gift{box-shadow:inset 4px 0 0 #ffab00;}
+  #bulkgift-modal .modal-card{max-height:90vh;overflow-y:auto;}
+  #bulkgift-modal input[type=datetime-local]{width:100%;min-width:0;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:11px 12px;border-radius:12px;font-size:15px;font-family:var(--body);margin-bottom:12px;}
+  #bulkgift-modal .row > div{min-width:0;}
+  .bg-list{max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;margin-bottom:10px;background:var(--surface2);}
+  .bg-row{display:flex;align-items:center;gap:8px;margin:0;padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;flex-wrap:wrap;}
+  .bg-row:last-child{border-bottom:none;}
+  .bg-row.dis{opacity:.5;cursor:default;}
+  .bg-row .bg-id{font-family:var(--mono);font-weight:700;word-break:break-all;}
+  .bg-row .bg-meta{font-size:11px;color:var(--muted);}
+  .bg-row .bg-live{background:#e8112d;color:#fff;font-size:11px;font-weight:700;padding:0 7px;border-radius:6px;}
+  .bg-empty{padding:16px;text-align:center;font-size:13px;color:var(--muted);}
   @keyframes livepulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
   .order-scan-card input[type=text]{margin-bottom:10px;font-family:var(--mono);font-size:16px;}
 
@@ -457,6 +468,7 @@
       <div class="brand"><span class="dot"></span>PackCheck<span class="by">by Wiz Zipper</span></div>
       <div class="header-actions">
         <button id="prize-badge" class="staff-badge prize-btn">🎁 <span>ลุ้นรางวัล</span></button>
+        <button id="bulkgift-badge" class="staff-badge prize-btn">🎀 <span>ของแถม</span></button>
         <button id="staff-badge" class="staff-badge">👤 <span id="staff-badge-name">ตั้งชื่อ</span></button>
       </div>
     </div>
@@ -482,6 +494,36 @@
       <div class="row">
         <button class="btn secondary" id="staff-modal-skip">ข้ามไปก่อน</button>
         <button class="btn" id="staff-modal-save">บันทึก</button>
+      </div>
+    </div>
+  </div>
+  <div id="bulkgift-modal" class="modal-overlay">
+    <div class="modal-card wide">
+      <div class="modal-title">🎀 ใส่ของแถมให้ออเดอร์</div>
+      <div class="modal-desc">เลือกของแถม (สินค้านอกรายการในออเดอร์) แล้วเลือกออเดอร์ที่ต้องใส่ ของแถมจะเข้าไปในรายการที่ต้องแพ็ค และต้องแสกนครบเหมือนสินค้าปกติ — ใช้กับออเดอร์ของวันที่เปิดอยู่</div>
+      <label>ของแถม</label>
+      <div class="pz-addrow"><div id="bg-item" class="pz-count" style="flex:1;margin:0">ยังไม่ได้เลือกของแถม</div><button class="btn secondary" id="bg-pick">เลือก</button></div>
+      <label>จำนวนต่อออเดอร์</label>
+      <input type="number" id="bg-qty" min="1" value="1" inputmode="numeric">
+      <label>ตัวกรองออเดอร์ (ไม่บังคับ)</label>
+      <div class="row">
+        <div><label>ช่องทาง</label><select id="bg-channel"></select></div>
+        <div><label>ไลฟ์ของ</label><select id="bg-creator"></select></div>
+      </div>
+      <div class="row">
+        <div><label>สั่งตั้งแต่</label><input type="datetime-local" id="bg-start"></div>
+        <div><label>ถึง</label><input type="datetime-local" id="bg-end"></div>
+      </div>
+      <input type="text" id="bg-search" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." autocomplete="off">
+      <div class="pz-addrow">
+        <button class="btn secondary" id="bg-all">เลือกทั้งหมดที่แสดง</button>
+        <button class="btn secondary" id="bg-none">ล้างที่เลือก</button>
+      </div>
+      <div id="bg-list" class="bg-list"></div>
+      <div id="bg-count" class="pz-count"></div>
+      <div class="row">
+        <button class="btn secondary" id="bg-cancel">ปิด</button>
+        <button class="btn" id="bg-apply">ใส่ของแถม</button>
       </div>
     </div>
   </div>
@@ -2497,7 +2539,7 @@ async function saveEditOrder(){
 /* ---- product picker (choose from the existing product catalog instead of typing SKU/name) ---- */
 function openProductPicker(targetIdx){
   State.productPickerTarget = targetIdx; // number = replace that row in editOrderDraft, 'new' = append a row, 'gift' = add a free gift to the open order
-  document.getElementById('pp-title').textContent = targetIdx === 'gift' ? '🎁 เลือกของแถม' : '🔍 เลือกสินค้า';
+  document.getElementById('pp-title').textContent = (targetIdx === 'gift' || targetIdx === 'bulkgift') ? '🎁 เลือกของแถม' : '🔍 เลือกสินค้า';
   const search = document.getElementById('pp-search');
   search.value = '';
   document.getElementById('pp-manual-form').style.display = 'none';
@@ -2564,6 +2606,13 @@ function selectProduct(code, name){
   if(idx === 'gift'){
     closeProductPicker();
     addGiftItem(code, name);
+    return;
+  }
+  if(idx === 'bulkgift'){
+    closeProductPicker();
+    State.bulkGift.item = { code, name: name || code };
+    bgRenderItem();
+    bgRenderList();
     return;
   }
   if(idx === 'new'){
@@ -4009,6 +4058,122 @@ document.getElementById('pz-creator-new').onkeydown = e => { if(e.key === 'Enter
 document.getElementById('pz-source-new').onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); prizeAddManual('source'); } };
 document.getElementById('pz-start').onchange = prizeRenderCount;
 document.getElementById('pz-end').onchange = prizeRenderCount;
+
+/* ============ BULK GIFT (ใส่ของแถมให้หลายออเดอร์) ============ */
+State.bulkGift = { item: null, picked: new Set() };
+function bgOrders(){ return (State.orders || []).filter(o => orderStatus(o) !== 'cancelled'); }
+function bgHasGift(o){
+  const g = State.bulkGift.item;
+  return !!(g && o.items.some(it => String(it.code).toLowerCase() === String(g.code).toLowerCase()));
+}
+function bgFiltered(){
+  const q = normHandle(document.getElementById('bg-search').value);
+  const ch = document.getElementById('bg-channel').value;
+  const cr = document.getElementById('bg-creator').value;
+  const st = parseCfgDT(document.getElementById('bg-start').value);
+  const en = parseCfgDT(document.getElementById('bg-end').value);
+  return bgOrders().filter(o => {
+    if(ch && normHandle(o.source) !== normHandle(ch)) return false;
+    if(cr && normHandle(o.creator) !== normHandle(cr)) return false;
+    if(st || en){
+      const t = parseOrderDateTime(o.orderDate);
+      if(!t) return false;
+      if(st && t < st) return false;
+      if(en && t.getTime() > en.getTime() + 59999) return false;
+    }
+    if(q && !(String(o.orderId).toLowerCase().includes(q) || String(o.customer || '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function bgRenderItem(){
+  const g = State.bulkGift.item;
+  document.getElementById('bg-item').textContent = g ? '🎁 ' + (g.name || g.code) + '  (' + g.code + ')' : 'ยังไม่ได้เลือกของแถม';
+}
+function bgRenderList(){
+  const list = bgFiltered();
+  const el = document.getElementById('bg-list');
+  if(!list.length){
+    el.innerHTML = '<div class="bg-empty">ไม่มีออเดอร์ตรงกับตัวกรอง</div>';
+  } else {
+    el.innerHTML = list.map(o => {
+      const has = bgHasGift(o);
+      const done = orderStatus(o) === 'done';
+      const on = State.bulkGift.picked.has(o.orderId);
+      const live = isLiveOrder(o) ? `<span class="bg-live">LIVE${o.creator ? ' ' + esc(o.creator) : ''}</span>` : '';
+      const note = has ? 'มีของแถมนี้ในออเดอร์แล้ว' : (done ? 'แพ็คครบแล้ว — ใส่แล้วจะกลับเป็นยังไม่ครบ' : '');
+      return `<label class="bg-row${has?' dis':''}"><input type="checkbox" data-bgid="${esc(o.orderId)}" ${on && !has ? 'checked' : ''} ${has ? 'disabled' : ''}><span class="bg-id">${esc(o.orderId)}</span>${live}<span class="bg-meta">${esc(o.orderDate || '')}${note ? ' · ' + note : ''}</span></label>`;
+    }).join('');
+    el.querySelectorAll('input[data-bgid]').forEach(cb => {
+      cb.onchange = () => {
+        if(cb.checked) State.bulkGift.picked.add(cb.dataset.bgid); else State.bulkGift.picked.delete(cb.dataset.bgid);
+        bgRenderCount();
+      };
+    });
+  }
+  bgRenderCount();
+}
+function bgPickedOrders(){
+  return bgOrders().filter(o => State.bulkGift.picked.has(o.orderId) && !bgHasGift(o));
+}
+function bgRenderCount(){
+  const n = bgPickedOrders().length;
+  const shown = bgFiltered().length;
+  document.getElementById('bg-count').textContent = `แสดง ${shown} ออเดอร์ · เลือกไว้ ${n} ออเดอร์`;
+  document.getElementById('bg-apply').textContent = n ? `ใส่ของแถมให้ ${n} ออเดอร์` : 'ใส่ของแถม';
+}
+function openBulkGiftModal(){
+  State.bulkGift = { item: null, picked: new Set() };
+  const orders = bgOrders();
+  const sources = [...new Set(orders.map(o => o.source).filter(x => x && !isNumericLike(x)))];
+  const creators = [...new Set(orders.map(o => o.creator).filter(Boolean))];
+  document.getElementById('bg-channel').innerHTML = '<option value="">ทั้งหมด</option>' + sources.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  document.getElementById('bg-creator').innerHTML = '<option value="">ทั้งหมด</option>' + creators.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  ['bg-start','bg-end','bg-search'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('bg-qty').value = 1;
+  bgRenderItem();
+  bgRenderList();
+  document.getElementById('bulkgift-modal').classList.add('show');
+}
+async function bgApplyGift(){
+  const g = State.bulkGift.item;
+  if(!g){ toast('กรุณาเลือกของแถมก่อน'); return; }
+  const qty = Math.max(1, parseInt(document.getElementById('bg-qty').value) || 1);
+  const targets = bgPickedOrders();
+  if(!targets.length){ toast('กรุณาเลือกออเดอร์ที่ต้องใส่ของแถมอย่างน้อย 1 ใบ'); return; }
+  const btn = document.getElementById('bg-apply');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  for(let i = 0; i < targets.length; i++){
+    btn.textContent = `กำลังบันทึก ${i + 1}/${targets.length}...`;
+    const o = targets[i];
+    try{
+      o.items.push({ code: g.code, name: g.name || g.code, qtyRequired: qty, qtyScanned: 0, gift: true });
+      o.itemsManuallyEdited = true; // กันไม่ให้อัปโหลดไฟล์ซ้ำมาลบของแถม
+      await saveOrder(State.date, o);
+      ok++;
+    }catch(e){
+      o.items.pop(); // ย้อนกลับถ้าบันทึกไม่สำเร็จ
+      fail++;
+    }
+  }
+  btn.disabled = false;
+  document.getElementById('bulkgift-modal').classList.remove('show');
+  toast(fail ? `ใส่ของแถมแล้ว ${ok} ออเดอร์ · ไม่สำเร็จ ${fail}` : `🎀 ใส่ของแถมให้ ${ok} ออเดอร์แล้ว`);
+  render();
+}
+document.getElementById('bulkgift-badge').onclick = openBulkGiftModal;
+document.getElementById('bg-cancel').onclick = () => document.getElementById('bulkgift-modal').classList.remove('show');
+document.getElementById('bg-apply').onclick = bgApplyGift;
+document.getElementById('bg-pick').onclick = () => {
+  openProductPicker('bulkgift');
+  refreshPrintCodes().then(() => {
+    if(State.productPickerTarget === 'bulkgift') renderProductPickerList(document.getElementById('pp-search').value);
+  }).catch(()=>{});
+};
+document.getElementById('bg-all').onclick = () => { bgFiltered().forEach(o => { if(!bgHasGift(o)) State.bulkGift.picked.add(o.orderId); }); bgRenderList(); };
+document.getElementById('bg-none').onclick = () => { State.bulkGift.picked.clear(); bgRenderList(); };
+['bg-channel','bg-creator','bg-start','bg-end'].forEach(id => document.getElementById(id).onchange = bgRenderList);
+document.getElementById('bg-search').oninput = bgRenderList;
 
 /* ============ PRINT BARCODE LABELS ============ */
 function renderPrint(){
