@@ -312,6 +312,10 @@
   .bg-row.dis{opacity:.5;cursor:default;}
   .bg-row .bg-id{font-family:var(--mono);font-weight:700;word-break:break-all;}
   .bg-row .bg-meta{font-size:11px;color:var(--muted);}
+  .bg-row .bg-items{flex-basis:100%;padding-left:26px;font-size:12px;color:var(--text);line-height:1.5;}
+  .bg-row .bg-items .bg-it{display:block;}
+  .bg-row .bg-items .bg-it.hit{font-weight:700;color:var(--accent);}
+  .bg-row .bg-items .bg-it small{font-family:var(--mono);color:var(--muted);font-weight:400;}
   .bg-row .bg-live{background:#e8112d;color:#fff;font-size:11px;font-weight:700;padding:0 7px;border-radius:6px;}
   .bg-empty{padding:16px;text-align:center;font-size:13px;color:var(--muted);}
   @keyframes livepulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
@@ -514,7 +518,9 @@
         <div><label>สั่งตั้งแต่</label><input type="datetime-local" id="bg-start"></div>
         <div><label>ถึง</label><input type="datetime-local" id="bg-end"></div>
       </div>
-      <input type="text" id="bg-search" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." autocomplete="off">
+      <label>สั่งสินค้า (SKU) — เลือกเฉพาะออเดอร์ที่มีสินค้านี้</label>
+      <select id="bg-sku"></select>
+      <input type="text" id="bg-search" placeholder="ค้นหา Order ID, ชื่อลูกค้า, SKU หรือชื่อสินค้า..." autocomplete="off">
       <div class="pz-addrow">
         <button class="btn secondary" id="bg-all">เลือกทั้งหมดที่แสดง</button>
         <button class="btn secondary" id="bg-none">ล้างที่เลือก</button>
@@ -4072,7 +4078,9 @@ function bgFiltered(){
   const cr = document.getElementById('bg-creator').value;
   const st = parseCfgDT(document.getElementById('bg-start').value);
   const en = parseCfgDT(document.getElementById('bg-end').value);
+  const sku = normHandle(document.getElementById('bg-sku').value);
   return bgOrders().filter(o => {
+    if(sku && !bgOrderedItems(o).some(it => normHandle(it.code) === sku)) return false;
     if(ch && normHandle(o.source) !== normHandle(ch)) return false;
     if(cr && normHandle(o.creator) !== normHandle(cr)) return false;
     if(st || en){
@@ -4081,10 +4089,13 @@ function bgFiltered(){
       if(st && t < st) return false;
       if(en && t.getTime() > en.getTime() + 59999) return false;
     }
-    if(q && !(String(o.orderId).toLowerCase().includes(q) || String(o.customer || '').toLowerCase().includes(q))) return false;
+    if(q && !(String(o.orderId).toLowerCase().includes(q) || String(o.customer || '').toLowerCase().includes(q)
+      || bgOrderedItems(o).some(it => String(it.code).toLowerCase().includes(q) || String(it.name || '').toLowerCase().includes(q)))) return false;
     return true;
   });
 }
+// สินค้าที่ลูกค้าสั่งจริง (ไม่นับของแถมที่ใส่เพิ่มเอง)
+function bgOrderedItems(o){ return (o.items || []).filter(it => !it.gift); }
 function bgRenderItem(){
   const g = State.bulkGift.item;
   document.getElementById('bg-item').textContent = g ? '🎁 ' + (g.name || g.code) + '  (' + g.code + ')' : 'ยังไม่ได้เลือกของแถม';
@@ -4101,7 +4112,11 @@ function bgRenderList(){
       const on = State.bulkGift.picked.has(o.orderId);
       const live = isLiveOrder(o) ? `<span class="bg-live">LIVE${o.creator ? ' ' + esc(o.creator) : ''}</span>` : '';
       const note = has ? 'มีของแถมนี้ในออเดอร์แล้ว' : (done ? 'แพ็คครบแล้ว — ใส่แล้วจะกลับเป็นยังไม่ครบ' : '');
-      return `<label class="bg-row${has?' dis':''}"><input type="checkbox" data-bgid="${esc(o.orderId)}" ${on && !has ? 'checked' : ''} ${has ? 'disabled' : ''}><span class="bg-id">${esc(o.orderId)}</span>${live}<span class="bg-meta">${esc(o.orderDate || '')}${note ? ' · ' + note : ''}</span></label>`;
+      const skuSel = normHandle(document.getElementById('bg-sku').value);
+      const itemsHtml = bgOrderedItems(o).map(it =>
+        `<span class="bg-it${skuSel && normHandle(it.code) === skuSel ? ' hit' : ''}">• ${esc(it.name || it.code)} × ${it.qtyRequired} <small>(${esc(it.code)})</small></span>`
+      ).join('');
+      return `<label class="bg-row${has?' dis':''}"><input type="checkbox" data-bgid="${esc(o.orderId)}" ${on && !has ? 'checked' : ''} ${has ? 'disabled' : ''}><span class="bg-id">${esc(o.orderId)}</span>${live}<span class="bg-meta">${esc(o.orderDate || '')}${note ? ' · ' + note : ''}</span><span class="bg-items">${itemsHtml}</span></label>`;
     }).join('');
     el.querySelectorAll('input[data-bgid]').forEach(cb => {
       cb.onchange = () => {
@@ -4128,6 +4143,20 @@ function openBulkGiftModal(){
   const creators = [...new Set(orders.map(o => o.creator).filter(Boolean))];
   document.getElementById('bg-channel').innerHTML = '<option value="">ทั้งหมด</option>' + sources.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
   document.getElementById('bg-creator').innerHTML = '<option value="">ทั้งหมด</option>' + creators.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  // ตัวเลือกสินค้า (SKU) ที่ลูกค้าสั่ง พร้อมจำนวนออเดอร์ที่มีสินค้านั้น
+  const skuMap = {};
+  orders.forEach(o => {
+    const seen = new Set();
+    bgOrderedItems(o).forEach(it => {
+      const k = normHandle(it.code);
+      if(!k || seen.has(k)) return;
+      seen.add(k);
+      if(!skuMap[k]) skuMap[k] = { code: it.code, name: it.name || it.code, n: 0 };
+      skuMap[k].n++;
+    });
+  });
+  const skuList = Object.values(skuMap).sort((a, b) => b.n - a.n || String(a.code).localeCompare(String(b.code)));
+  document.getElementById('bg-sku').innerHTML = '<option value="">ทั้งหมด (ทุกสินค้า)</option>' + skuList.map(s => `<option value="${esc(s.code)}">${esc(s.name)} (${esc(s.code)}) — ${s.n} ออเดอร์</option>`).join('');
   ['bg-start','bg-end','bg-search'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('bg-qty').value = 1;
   bgRenderItem();
@@ -4172,7 +4201,7 @@ document.getElementById('bg-pick').onclick = () => {
 };
 document.getElementById('bg-all').onclick = () => { bgFiltered().forEach(o => { if(!bgHasGift(o)) State.bulkGift.picked.add(o.orderId); }); bgRenderList(); };
 document.getElementById('bg-none').onclick = () => { State.bulkGift.picked.clear(); bgRenderList(); };
-['bg-channel','bg-creator','bg-start','bg-end'].forEach(id => document.getElementById(id).onchange = bgRenderList);
+['bg-channel','bg-creator','bg-sku','bg-start','bg-end'].forEach(id => document.getElementById(id).onchange = bgRenderList);
 document.getElementById('bg-search').oninput = bgRenderList;
 
 /* ============ PRINT BARCODE LABELS ============ */
