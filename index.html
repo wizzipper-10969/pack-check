@@ -520,6 +520,7 @@
       </div>
       <label>สั่งสินค้า (SKU) — เลือกเฉพาะออเดอร์ที่มีสินค้านี้</label>
       <select id="bg-sku"></select>
+      <div id="bg-sku-hint" class="muted" style="font-size:12px;margin:-6px 0 10px;display:none"></div>
       <input type="text" id="bg-search" placeholder="ค้นหา Order ID, ชื่อลูกค้า, SKU หรือชื่อสินค้า..." autocomplete="off">
       <div class="pz-addrow">
         <button class="btn secondary" id="bg-all">เลือกทั้งหมดที่แสดง</button>
@@ -3606,11 +3607,16 @@ function wireAdmin(){
       if(!orderIdRaw || !codeRaw){ skippedInvalid++; return; }
       const orderId = orderIdRaw;
       const code = codeRaw;
-      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH && !isNumericLike(r[srcH]) ? String(r[srcH]||'').trim() : '') || srcDefault, creator: creatorH ? String(r[creatorH]||'').trim() : '', items: [] };
+      if(!grouped[orderId]) grouped[orderId] = { orderId, customer: custH ? String(r[custH]||'').trim() : '', tracking: trackH ? String(r[trackH]||'').trim() : '', orderDate: dateH ? normOrderDate(r[dateH]) : '', source: (srcH && !isNumericLike(r[srcH]) ? String(r[srcH]||'').trim() : '') || srcDefault, creator: creatorH ? String(r[creatorH]||'').trim() : '', orderedSkus: [], items: [] };
       if(creatorH && !grouped[orderId].creator){ grouped[orderId].creator = String(r[creatorH]||'').trim(); }
       const name = String(r[nh]||'').trim();
       let qty = parseInt(r[qh]);
       if(isNaN(qty) || qty<=0) qty = 1;
+      // จำ SKU ที่ลูกค้า "สั่งจริง" ก่อนแตกเซท (เช่น SET18) ไว้ใช้กรองตอนใส่ของแถม — items ด้านล่างจะถูกแตกเป็นสินค้าย่อยแล้ว
+      {
+        const ex = grouped[orderId].orderedSkus.find(s => s.code === code);
+        if(ex) ex.qty += qty; else grouped[orderId].orderedSkus.push({ code, name, qty });
+      }
 
       const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
       // a set definition whose ONLY component points back at its own code is not a real
@@ -3787,6 +3793,10 @@ function wireAdmin(){
         creator: group.map(o => o.creator).find(Boolean) || '',
         tracking: group[0].tracking,
         originalOrderIds,
+        orderedSkus: group.reduce((acc, o) => {
+          (o.orderedSkus || []).forEach(s => { const ex = acc.find(a => a.code === s.code); if(ex) ex.qty += s.qty; else acc.push({ code: s.code, name: s.name, qty: s.qty }); });
+          return acc;
+        }, []),
         items: mergedItems
       }, anyMemberEdited ? { itemsManuallyEdited: true } : null);
       existingByOrderId[mergedOrderId] = prev;
@@ -4095,7 +4105,13 @@ function bgFiltered(){
   });
 }
 // สินค้าที่ลูกค้าสั่งจริง (ไม่นับของแถมที่ใส่เพิ่มเอง)
-function bgOrderedItems(o){ return (o.items || []).filter(it => !it.gift); }
+// ถ้าออเดอร์ถูกนำเข้าด้วยเวอร์ชันนี้จะมี orderedSkus (SKU ก่อนแตกเซท เช่น SET18) — ออเดอร์เก่าที่ยังไม่มีให้ใช้รายการที่แตกแล้วแทน
+function bgOrderedItems(o){
+  if(Array.isArray(o.orderedSkus) && o.orderedSkus.length){
+    return o.orderedSkus.map(s => ({ code: s.code, name: s.name || s.code, qtyRequired: s.qty }));
+  }
+  return (o.items || []).filter(it => !it.gift);
+}
 function bgRenderItem(){
   const g = State.bulkGift.item;
   document.getElementById('bg-item').textContent = g ? '🎁 ' + (g.name || g.code) + '  (' + g.code + ')' : 'ยังไม่ได้เลือกของแถม';
@@ -4157,6 +4173,10 @@ function openBulkGiftModal(){
   });
   const skuList = Object.values(skuMap).sort((a, b) => b.n - a.n || String(a.code).localeCompare(String(b.code)));
   document.getElementById('bg-sku').innerHTML = '<option value="">ทั้งหมด (ทุกสินค้า)</option>' + skuList.map(s => `<option value="${esc(s.code)}">${esc(s.name)} (${esc(s.code)}) — ${s.n} ออเดอร์</option>`).join('');
+  const oldN = orders.filter(o => !(Array.isArray(o.orderedSkus) && o.orderedSkus.length)).length;
+  const hint = document.getElementById('bg-sku-hint');
+  hint.style.display = oldN ? 'block' : 'none';
+  hint.textContent = oldN ? '⚠ ' + oldN + ' ออเดอร์ยังไม่มีข้อมูล SKU ก่อนแตกเซท (เช่น SET18) — ถ้าสินค้าที่สั่งเป็นเซท ให้อัปโหลดไฟล์ออเดอร์ของวันนี้ซ้ำ (โหมด "อัปเดตทับ" ไม่ทำให้สถานะแพ็คหาย) แล้วตัวกรองจะเห็น SKU เซทด้วย' : '';
   ['bg-start','bg-end','bg-search'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('bg-qty').value = 1;
   bgRenderItem();
