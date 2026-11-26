@@ -24,6 +24,8 @@
 <script src="https://cdn.jsdelivr.net/npm/barcode-detector@3.2.2/dist/iife/polyfill.js" onerror="console.warn('barcode-detector polyfill load failed')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.12.3/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
 <style>
   :root{
     --bg:#cbbdf0;
@@ -815,6 +817,10 @@
     <button id="tab-staff" class="active">
       <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="8" width="10" height="8" rx="1.5"/></svg></span>
       <span class="tab-label">สแกนแพ็ค</span>
+    </button>
+    <button id="tab-api-print">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
+      <span class="tab-label">ปริ้นใบปะหน้า</span>
     </button>
     <button id="tab-verify">
       <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
@@ -5443,89 +5449,22 @@ document.getElementById('tab-dash').onclick = () => setTab('dash');
 
 // --- 1. ซิงค์ออเดอร์จาก TikTok Shop API ---
 async function syncOrdersFromTikTokApi(){
-  toast('⏳ กำลังซิงค์ออเดอร์ใหม่จาก TikTok Shop API...');
+  toast('⏳ กำลังซิงค์ออเดอร์และอัปเดตเลขพัสดุจาก TikTok API...');
   try{
     const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders`);
     const json = await res.json();
-    
-    console.log('TikTok Worker Response:', json);
     if(json.code !== undefined && json.code !== 0){
-      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error || 'กรุณาตรวจสอบการเชื่อมต่อร้านค้า'));
+      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error));
       return;
     }
-    
-    const apiOrders = json.data?.orders || json.data?.order_list || json.orders || (Array.isArray(json.data) ? json.data : []);
-    if(!Array.isArray(apiOrders) || apiOrders.length === 0){
-      if(json.code !== 0 && json.message){
-        toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + json.message);
-      } else {
-        toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
-      }
+    const apiOrders = json.data?.orders || [];
+    if(!apiOrders.length){
+      toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
       return;
     }
-
-    const setDefs = await loadAllSetDefs();
-    const date = State.date || todayStr();
-    const existingEntries = await getExistingOrderEntries(date);
-    const existingMap = {};
-    existingEntries.forEach(en => { try{ existingMap[JSON.parse(en.value).orderId] = JSON.parse(en.value); }catch(e){} });
-
-    const writeEntries = [];
-    let newCount = 0;
-
-    for(const ao of apiOrders){
-      const orderId = String(ao.id || ao.order_id || '');
-      if(!orderId || existingMap[orderId]) continue;
-
-      const items = [];
-      const orderedSkus = [];
-      (ao.line_items || ao.item_list || []).forEach(li => {
-        const code = String(li.seller_sku || li.sku_id || '').trim();
-        const name = String(li.product_name || li.sku_name || code).trim();
-        const qty = parseInt(li.quantity || li.count) || 1;
-        orderedSkus.push({ code, name, qty });
-
-        const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
-        const isRealBundle = setDef && setDef.components?.length && !(setDef.components.length === 1 && setDef.components[0].code === code);
-        if(isRealBundle){
-          setDef.components.forEach(comp => {
-            const ex = items.find(i => i.code === comp.code);
-            if(ex) ex.qtyRequired += (comp.qty || 1) * qty;
-            else items.push({ code: comp.code, name: comp.name || comp.code, qtyRequired: (comp.qty || 1) * qty, qtyScanned: 0 });
-          });
-        } else {
-          const ex = items.find(i => i.code === code);
-          if(ex) ex.qtyRequired += qty;
-          else items.push({ code, name, qtyRequired: qty, qtyScanned: 0 });
-        }
-      });
-
-      const orderObj = {
-        orderId,
-        packageId: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
-        customer: ao.recipient_address?.name || ao.buyer_email || 'ลูกค้า TikTok',
-        tracking: ao.tracking_number || '',
-        orderDate: ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH') : '',
-        source: 'TikTok Shop API',
-        creator: '',
-        orderedSkus,
-        items,
-        status: 'pending',
-        updatedAt: Date.now()
-      };
-      writeEntries.push({ key: orderKey(date, orderId), value: JSON.stringify(orderObj) });
-      newCount++;
-    }
-
-    if(writeEntries.length > 0){
-      await sBatchSet(writeEntries);
-      await addDateToIndex(date);
-      toast(`🎉 ซิงค์ออเดอร์ใหม่สำเร็จ ${newCount} ออเดอร์!`);
-      await refreshStaffList();
-      render();
-    } else {
-      toast('✅ ข้อมูลออเดอร์เป็นปัจจุบันแล้ว');
-    }
+    await upsertApiOrdersToPackCheck(apiOrders, false);
+    await refreshStaffList();
+    render();
   }catch(err){
     toast('❌ เชื่อมต่อ Worker ไม่สำเร็จ: ' + err.message);
   }
@@ -5604,9 +5543,10 @@ renderStaffList = function(){
       <div class="hero-title">Pack Faster. Zero Errors.</div>
       <div class="hero-sub">สแกนบาร์โค้ดเช็คสินค้าแม่นยำ 100% ประจำวันที่ ${fmtDateTH(State.date)}</div>
       <div class="hero-cta-row">
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="hero-cta-btn" id="api-manager-btn" style="background:#00997a">🖨️ จัดการ &amp; พิมพ์ API</button><button class="hero-cta-btn" id="sync-tiktok-btn">
+        <button class="hero-cta-btn" id="sync-tiktok-btn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          ซิงค์ TikTok API</button></div>
+          ซิงค์ TikTok API
+        </button>
         <div class="hero-stat-pill">แพ็คแล้ว ${doneCount}/${total}</div>
       </div>
     </div>
@@ -5647,7 +5587,6 @@ wireStaffList = function(){
   _origWireStaffList();
   const syncBtn = document.getElementById('sync-tiktok-btn');
   if(syncBtn) syncBtn.onclick = syncOrdersFromTikTokApi;
-  const amBtn = document.getElementById("api-manager-btn"); if(amBtn) amBtn.onclick = openApiManagerModal;
 
   document.querySelectorAll('[data-ifilter]').forEach(pill => {
     pill.onclick = () => {
@@ -5795,7 +5734,7 @@ async function renderDashboard(){
       <div class="hero-title">สวัสดี, ${esc(State.staffName || 'ทีมงาน B&P')} 👋</div>
       <div class="hero-sub">สรุปภาพรวมการแพ็คออเดอร์วันที่ ${fmtDateTH(State.date)}</div>
       <div class="hero-cta-row">
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="hero-cta-btn" id="dash-api-manager-btn" style="background:#00997a">🖨️ จัดการ &amp; พิมพ์ API</button><button class="hero-cta-btn" id="dash-sync-btn">🔄 ซิงค์ TikTok API</button></div>
+        <button class="hero-cta-btn" id="dash-sync-btn">🔄 ซิงค์ TikTok API</button>
         <div class="hero-stat-pill">สำเร็จ ${percentDone}%</div>
       </div>
     </div>
@@ -5874,90 +5813,83 @@ async function renderDashboard(){
 
   const dSync = document.getElementById('dash-sync-btn');
   if(dSync) dSync.onclick = syncOrdersFromTikTokApi;
-  const dAm = document.getElementById("dash-api-manager-btn"); if(dAm) dAm.onclick = openApiManagerModal;
 }
 </script>
 
 
-<div id="api-manager-modal" class="modal-overlay">
-  <div class="modal-card wide" style="max-width:680px">
-    <div class="modal-title">🖨️ จัดการ &amp; ปริ้นออเดอร์ TikTok API</div>
-    <div class="modal-desc">กรองช่วงเวลาระดับนาที เลือกไลฟ์ สินค้า และจำนวนชิ้น เพื่อกด <b>"เตรียมการจัดส่ง+พิมพ์"</b> หรือซิงค์เข้าคิวแพ็ค</div>
-
-    <div class="row">
-      <div><label>สถานะคำสั่งซื้อ</label>
-        <select id="am-status">
-          <option value="ALL_UNSHIPPED">ทั้งหมดที่ยังไม่ส่ง (รอจัดส่ง + รอเข้ารับ)</option>
-          <option value="AWAITING_SHIPMENT">เฉพาะรอจัดส่ง (ยังไม่กดนัดรับ)</option>
-          <option value="AWAITING_COLLECTION">เฉพาะรอเข้ารับ (กดนัดรับแล้ว)</option>
-        </select>
-      </div>
-      <div><label>ช่องทางที่สั่ง</label>
-        <select id="am-channel">
-          <option value="">ทุกช่องทาง</option>
-          <option value="LIVE">เฉพาะ LIVE</option>
-          <option value="VIDEO">เฉพาะ Video</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="row">
-      <div><label>สั่งตั้งแต่ (วัน/เวลา)</label><input type="datetime-local" id="am-start"></div>
-      <div><label>ถึง (วัน/เวลา)</label><input type="datetime-local" id="am-end"></div>
-    </div>
-
-    <div class="row">
-      <div><label>ไลฟ์ของ (Creator Handle)</label><input type="text" id="am-creator" placeholder="เช่น maphway8 (ว่าง = ทั้งหมด)"></div>
-      <div><label>รหัสสินค้า (SKU)</label><input type="text" id="am-sku" placeholder="พิมพ์ SKU หรือชื่อสินค้า..."></div>
-    </div>
-
-    <div class="row" style="align-items:flex-end">
-      <div><label>จำนวนชิ้นรวมขั้นต่ำในออเดอร์</label><input type="number" id="am-min-qty" min="1" value="1"></div>
-      <div style="margin-bottom:10px"><button class="btn" id="am-fetch-btn">🔍 ดึงข้อมูลและกรอง</button></div>
-    </div>
-
-    <div class="pz-addrow">
-      <button class="btn secondary" id="am-select-all">เลือกทั้งหมด</button>
-      <button class="btn secondary" id="am-select-none">ล้างที่เลือก</button>
-    </div>
-
-    <div id="am-list" class="bg-list" style="max-height:260px">
-      <div class="bg-empty">กดปุ่ม "🔍 ดึงข้อมูลและกรอง" เพื่อแสดงรายการออเดอร์จาก TikTok</div>
-    </div>
-    <div id="am-count" class="pz-count">เลือกไว้ 0 ออเดอร์</div>
-
-    <div class="row" style="margin-bottom:8px">
-      <button class="btn" id="am-ship-print-btn" style="background:#00997a">🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า</button>
-    </div>
-    <div class="row">
-      <button class="btn secondary" id="am-picklist-btn">📋 พิมพ์ใบสรุปหยิบของ (Pick List)</button>
-      <button class="btn secondary" id="am-sync-queue-btn">📥 นำเข้าคิวสแกนแพ็ค</button>
-    </div>
-    <button class="btn ghost" id="am-close-btn" style="margin-top:8px">ปิดหน้าต่าง</button>
-  </div>
-</div>
-
 <script>
 
-// --- 6. ระบบจัดการและปริ้นออเดอร์ตามช่วงเวลา (TikTok Smart Filter & Batch Print) ---
-State.apiManagerOrders = [];
-State.apiManagerFiltered = [];
-State.apiManagerPicked = new Set();
+// --- 6. เมนูแยกต่างหาก: ระบบปริ้นใบปะหน้า & จัดการออเดอร์ TikTok API ---
+State.apiOrdersAll = [];
+State.apiOrdersFiltered = [];
+State.apiOrdersPicked = new Set();
+State.apiFilterOpen = false;
+State.apiFilterState = {
+  status: 'ALL_UNSHIPPED',
+  channel: '',
+  start: '',
+  end: '',
+  creator: '',
+  sku: '',
+  minQty: 1
+};
 
-function openApiManagerModal(){
-  document.getElementById('api-manager-modal').classList.add('show');
+const _prevSetTab = setTab;
+setTab = function(tab){
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  if(tab === 'api-print'){
+    State.view = 'api-print';
+    document.getElementById('tab-api-print')?.classList.add('active');
+    stopCamera();
+    renderApiPrintView(true);
+    return;
+  }
+  _prevSetTab(tab);
+};
+document.getElementById('tab-api-print').onclick = () => setTab('api-print');
+
+async function fetchApiOrdersForPrintView(autoSyncToQueue = false){
+  const main = document.getElementById('main');
+  if(!State.apiOrdersAll.length){
+    main.innerHTML = '<div class="empty">⏳ กำลังดึงรายการออเดอร์ล่าสุดจาก TikTok Shop...</div>';
+  }
+  try{
+    const st = State.apiFilterState.status || 'ALL_UNSHIPPED';
+    const params = new URLSearchParams({ status: st });
+    const stDT = parseCfgDT(State.apiFilterState.start);
+    const enDT = parseCfgDT(State.apiFilterState.end);
+    if(stDT) params.set('start_time', Math.floor(stDT.getTime() / 1000));
+    if(enDT) params.set('end_time', Math.floor((enDT.getTime() + 59999) / 1000));
+
+    const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders?${params.toString()}`);
+    const json = await res.json();
+    if(json.code !== undefined && json.code !== 0){
+      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error));
+      renderApiPrintDOM();
+      return;
+    }
+    State.apiOrdersAll = json.data?.orders || [];
+    applyApiPrintFilters(false);
+    if(autoSyncToQueue && State.apiOrdersAll.length > 0){
+      await upsertApiOrdersToPackCheck(State.apiOrdersAll, true);
+    }
+    renderApiPrintDOM();
+  }catch(err){
+    toast('❌ เชื่อมต่อ Worker ไม่สำเร็จ: ' + err.message);
+    renderApiPrintDOM();
+  }
 }
-document.getElementById('am-close-btn').onclick = () => document.getElementById('api-manager-modal').classList.remove('show');
 
-function amApplyLocalFilters(){
-  const ch = document.getElementById('am-channel').value.trim().toUpperCase();
-  const creator = document.getElementById('am-creator').value.trim().toLowerCase();
-  const sku = document.getElementById('am-sku').value.trim().toLowerCase();
-  const minQty = Math.max(1, parseInt(document.getElementById('am-min-qty').value) || 1);
-  const stDT = parseCfgDT(document.getElementById('am-start').value);
-  const enDT = parseCfgDT(document.getElementById('am-end').value);
+function applyApiPrintFilters(shouldRender = true){
+  const f = State.apiFilterState;
+  const ch = (f.channel || '').trim().toUpperCase();
+  const creator = (f.creator || '').trim().toLowerCase();
+  const sku = (f.sku || '').trim().toLowerCase();
+  const minQty = Math.max(1, parseInt(f.minQty) || 1);
+  const stDT = parseCfgDT(f.start);
+  const enDT = parseCfgDT(f.end);
 
-  State.apiManagerFiltered = (State.apiManagerOrders || []).filter(ao => {
+  State.apiOrdersFiltered = (State.apiOrdersAll || []).filter(ao => {
     const createMs = (ao.create_time || 0) * 1000;
     if(stDT && createMs < stDT.getTime()) return false;
     if(enDT && createMs > enDT.getTime() + 59999) return false;
@@ -5983,157 +5915,307 @@ function amApplyLocalFilters(){
     return true;
   });
 
-  State.apiManagerPicked = new Set(State.apiManagerFiltered.map(ao => String(ao.id || ao.order_id)));
-  amRenderList();
+  // Keep valid picks or default select all if none picked yet
+  const validIds = new Set(State.apiOrdersFiltered.map(ao => String(ao.id || ao.order_id)));
+  const nextPicked = new Set();
+  State.apiOrdersPicked.forEach(id => { if(validIds.has(id)) nextPicked.add(id); });
+  State.apiOrdersPicked = nextPicked;
+
+  if(shouldRender) renderApiPrintDOM();
 }
 
-function amRenderList(){
-  const el = document.getElementById('am-list');
-  const list = State.apiManagerFiltered;
-  if(!list.length){
-    el.innerHTML = '<div class="bg-empty">ไม่พบออเดอร์ที่ตรงกับเงื่อนไขที่กำหนด</div>';
-    amUpdateCount();
-    return;
+async function renderApiPrintView(forceFetch = false){
+  if(forceFetch || State.apiOrdersAll.length === 0){
+    await fetchApiOrdersForPrintView(true);
+  } else {
+    applyApiPrintFilters(true);
   }
-  el.innerHTML = list.map(ao => {
+}
+
+function renderApiPrintDOM(){
+  const main = document.getElementById('main');
+  const f = State.apiFilterState;
+  const list = State.apiOrdersFiltered;
+  const unshippedCount = State.apiOrdersAll.filter(o => o.status === 'AWAITING_SHIPMENT').length;
+  const collectionCount = State.apiOrdersAll.filter(o => o.status === 'AWAITING_COLLECTION').length;
+  const hasActiveFilter = Boolean(f.channel || f.start || f.end || f.creator || f.sku || (f.minQty && f.minQty > 1));
+
+  const filterPanelHtml = State.apiFilterOpen ? `
+    <div class="card" style="background:#f8f6fe;border:1.5px solid var(--accent-soft);margin-bottom:14px">
+      <div style="font-weight:800;font-size:14.5px;margin-bottom:10px;color:var(--accent)">🔍 ตัวกรองละเอียด (ใช้เฉพาะตอนต้องการคัดกรอง)</div>
+      <div class="row">
+        <div><label>สถานะคำสั่งซื้อ</label>
+          <select id="ap-status">
+            <option value="ALL_UNSHIPPED" ${f.status==='ALL_UNSHIPPED'?'selected':''}>ทั้งหมดที่ยังไม่ส่ง (${State.apiOrdersAll.length})</option>
+            <option value="AWAITING_SHIPMENT" ${f.status==='AWAITING_SHIPMENT'?'selected':''}>รอจัดส่ง / ยังไม่กดรับ (${unshippedCount})</option>
+            <option value="AWAITING_COLLECTION" ${f.status==='AWAITING_COLLECTION'?'selected':''}>รอเข้ารับ / กดรับแล้ว (${collectionCount})</option>
+          </select>
+        </div>
+        <div><label>ช่องทางที่สั่ง</label>
+          <select id="ap-channel">
+            <option value="" ${f.channel===''?'selected':''}>ทุกช่องทาง</option>
+            <option value="LIVE" ${f.channel==='LIVE'?'selected':''}>เฉพาะ LIVE</option>
+            <option value="VIDEO" ${f.channel==='VIDEO'?'selected':''}>เฉพาะ Video</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>สั่งตั้งแต่ (วัน/เวลา)</label><input type="datetime-local" id="ap-start" value="${esc(f.start)}"></div>
+        <div><label>ถึง (วัน/เวลา)</label><input type="datetime-local" id="ap-end" value="${esc(f.end)}"></div>
+      </div>
+      <div class="row">
+        <div><label>ไลฟ์ของ (Creator Handle)</label><input type="text" id="ap-creator" value="${esc(f.creator)}" placeholder="เช่น maphway8"></div>
+        <div><label>สินค้า (SKU หรือชื่อสินค้า)</label><input type="text" id="ap-sku" value="${esc(f.sku)}" placeholder="เช่น P0012"></div>
+      </div>
+      <div class="row" style="align-items:flex-end">
+        <div><label>จำนวนชิ้นรวมขั้นต่ำ</label><input type="number" id="ap-min-qty" min="1" value="${f.minQty||1}"></div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <button class="btn secondary" id="ap-reset-filter">ล้างตัวกรอง</button>
+          <button class="btn" id="ap-refetch-btn">ดึงข้อมูลใหม่</button>
+        </div>
+      </div>
+    </div>
+  ` : '';
+
+  const rowsHtml = list.length ? list.map(ao => {
     const oid = String(ao.id || ao.order_id);
-    const on = State.apiManagerPicked.has(oid);
-    const stText = ao.status === 'AWAITING_SHIPMENT' ? 'รอจัดส่ง' : 'รอเข้ารับ';
-    const dtStr = ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+    const checked = State.apiOrdersPicked.has(oid);
+    const isWaitShip = ao.status === 'AWAITING_SHIPMENT';
+    const dtStr = ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
     const lineItems = ao.line_items || ao.item_list || [];
     const cr = ao.creator_username || ao.creator_handle || lineItems[0]?.creator_username || '';
-    const itemsHtml = lineItems.map(li => `<span class="bg-it">• ${esc(li.product_name || li.seller_sku)} × ${li.quantity || 1} <small>(${esc(li.seller_sku || '')})</small></span>`).join('');
-    return `<label class="bg-row">
-      <input type="checkbox" data-amid="${esc(oid)}" ${on?'checked':''}>
-      <span class="bg-id">${esc(oid)}</span>
-      <span class="pill ${ao.status==='AWAITING_SHIPMENT'?'progress':'done'}">${stText}</span>
-      ${cr ? `<span class="bg-live">LIVE ${esc(cr)}</span>` : ''}
-      <span class="bg-meta">🕒 ${dtStr}</span>
-      <span class="bg-items">${itemsHtml}</span>
-    </label>`;
-  }).join('');
+    const trk = ao.tracking_number || ao.packages?.[0]?.tracking_number || '';
+    const itemsHtml = lineItems.map(li => `
+      <div style="font-size:12.5px;margin-top:3px;color:var(--text)">
+        • <b>${esc(li.product_name || li.seller_sku)}</b> <span class="mono muted">(${esc(li.seller_sku || '-')})</span> × <b>${li.quantity || 1}</b>
+      </div>
+    `).join('');
 
-  el.querySelectorAll('input[data-amid]').forEach(cb => {
+    return `
+      <label class="order-item ${isWaitShip?'progress':'done'}" style="align-items:flex-start;cursor:pointer">
+        <input type="checkbox" class="ap-check" data-oid="${esc(oid)}" ${checked?'checked':''} style="width:20px;height:20px;margin-top:3px;accent-color:var(--accent);flex-shrink:0">
+        <div class="meta">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span class="oid">${esc(oid)}</span>
+            <span class="pill ${isWaitShip?'progress':'done'}">${isWaitShip?'รอจัดส่ง (ยังไม่กดรับ)':'รอเข้ารับ (กดรับแล้ว)'}</span>
+            ${cr ? `<span class="bg-live" style="background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px">LIVE ${esc(cr)}</span>` : ''}
+          </div>
+          <div class="cust" style="margin-top:3px">👤 ${esc(ao.recipient_address?.name || ao.buyer_email || 'ลูกค้า TikTok')} · 🕒 ${dtStr}</div>
+          ${trk ? `<div class="mono" style="font-size:12px;color:#047857;font-weight:700;margin-top:2px">📦 เลขพัสดุ: ${esc(trk)}</div>` : `<div class="muted" style="font-size:11.5px;margin-top:2px">⏳ เลขพัสดุจะออกอัตโนมัติเมื่อกด "เตรียมการจัดส่ง+พิมพ์"</div>`}
+          <div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.08)">${itemsHtml}</div>
+        </div>
+      </label>
+    `;
+  }).join('') : `<div class="empty"><div class="big">📭</div>ไม่มีรายการออเดอร์ในหน้านี้<br><span class="muted" style="font-size:13px">กดปุ่ม "🔄 รีเฟรชออเดอร์ล่าสุด" ด้านบนเพื่อดึงข้อมูลใหม่จาก TikTok</span></div>`;
+
+  main.innerHTML = `
+    <div class="hero-banner" style="background:linear-gradient(135deg, #00997a 0%, #007a60 100%)">
+      <div class="hero-title">🖨️ ปริ้นใบปะหน้า &amp; จัดการออเดอร์ TikTok</div>
+      <div class="hero-sub">ใบปะหน้าพร้อมรายการสินค้าด้านล่าง (100×150mm) รวมเป็นไฟล์ PDF เดียว + อัปเดตเลขพัสดุเข้าคิวแพ็คทันที</div>
+      <div class="hero-cta-row">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="hero-cta-btn" id="ap-refresh-top" style="background:#17151c">🔄 รีเฟรชออเดอร์ล่าสุด</button>
+          <button class="hero-cta-btn" id="ap-toggle-filter" style="background:rgba(255,255,255,0.22)">
+            🔍 ${State.apiFilterOpen ? 'ซ่อนตัวกรอง ▲' : (hasActiveFilter ? 'ตัวกรอง (กำลังใช้งาน) ▼' : 'เปิดตัวกรองละเอียด ▼')}
+          </button>
+        </div>
+        <div class="hero-stat-pill">ทั้งหมด ${list.length} ออเดอร์</div>
+      </div>
+    </div>
+
+    ${filterPanelHtml}
+
+    <div class="card" style="position:sticky;top:68px;z-index:20;padding:12px 14px;background:#ffffff;border:1.5px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="display:flex;gap:6px">
+          <button class="btn secondary" id="ap-sel-all" style="width:auto;min-height:36px;padding:6px 12px;font-size:12.5px">เลือกทั้งหมด (${list.length})</button>
+          <button class="btn secondary" id="ap-sel-none" style="width:auto;min-height:36px;padding:6px 12px;font-size:12.5px">ล้างที่เลือก</button>
+        </div>
+        <div style="font-weight:800;font-size:13.5px;color:var(--accent)">เลือกไว้ ${State.apiOrdersPicked.size} ออเดอร์</div>
+      </div>
+      <div class="row">
+        <button class="btn" id="ap-batch-print-btn" style="background:#00997a;flex:2">🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)</button>
+        <button class="btn secondary" id="ap-picklist-btn" style="flex:1">📋 ใบสรุปหยิบของ</button>
+      </div>
+    </div>
+
+    <div id="ap-orders-container">${rowsHtml}</div>
+  `;
+
+  wireApiPrintDOM();
+}
+
+function wireApiPrintDOM(){
+  document.getElementById('ap-refresh-top').onclick = () => fetchApiOrdersForPrintView(true);
+  document.getElementById('ap-toggle-filter').onclick = () => {
+    State.apiFilterOpen = !State.apiFilterOpen;
+    renderApiPrintDOM();
+  };
+
+  if(State.apiFilterOpen){
+    document.getElementById('ap-status').onchange = (e) => {
+      State.apiFilterState.status = e.target.value;
+      fetchApiOrdersForPrintView(false);
+    };
+    document.getElementById('ap-channel').onchange = (e) => { State.apiFilterState.channel = e.target.value; applyApiPrintFilters(true); };
+    document.getElementById('ap-start').onchange = (e) => { State.apiFilterState.start = e.target.value; applyApiPrintFilters(true); };
+    document.getElementById('ap-end').onchange = (e) => { State.apiFilterState.end = e.target.value; applyApiPrintFilters(true); };
+    document.getElementById('ap-creator').oninput = (e) => { State.apiFilterState.creator = e.target.value; applyApiPrintFilters(false); updateApListOnly(); };
+    document.getElementById('ap-sku').oninput = (e) => { State.apiFilterState.sku = e.target.value; applyApiPrintFilters(false); updateApListOnly(); };
+    document.getElementById('ap-min-qty').oninput = (e) => { State.apiFilterState.minQty = e.target.value; applyApiPrintFilters(false); updateApListOnly(); };
+    document.getElementById('ap-reset-filter').onclick = () => {
+      State.apiFilterState = { status: 'ALL_UNSHIPPED', channel: '', start: '', end: '', creator: '', sku: '', minQty: 1 };
+      applyApiPrintFilters(true);
+    };
+    document.getElementById('ap-refetch-btn').onclick = () => fetchApiOrdersForPrintView(true);
+  }
+
+  document.getElementById('ap-sel-all').onclick = () => {
+    State.apiOrdersFiltered.forEach(ao => State.apiOrdersPicked.add(String(ao.id || ao.order_id)));
+    renderApiPrintDOM();
+  };
+  document.getElementById('ap-sel-none').onclick = () => {
+    State.apiOrdersPicked.clear();
+    renderApiPrintDOM();
+  };
+
+  document.querySelectorAll('.ap-check').forEach(cb => {
     cb.onchange = () => {
-      if(cb.checked) State.apiManagerPicked.add(cb.dataset.amid);
-      else State.apiManagerPicked.delete(cb.dataset.amid);
-      amUpdateCount();
+      if(cb.checked) State.apiOrdersPicked.add(cb.dataset.oid);
+      else State.apiOrdersPicked.delete(cb.dataset.oid);
+      renderApiPrintDOM();
     };
   });
-  amUpdateCount();
-}
 
-function amUpdateCount(){
-  const n = State.apiManagerPicked.size;
-  document.getElementById('am-count').textContent = `แสดง ${State.apiManagerFiltered.length} ออเดอร์ · เลือกไว้ ${n} ออเดอร์`;
-}
+  // 1) เตรียมการจัดส่ง + รวมไฟล์ PDF เดียว + อัปเดต Tracking Number เข้าคิวแพ็คทันที
+  document.getElementById('ap-batch-print-btn').onclick = async () => {
+    const selected = State.apiOrdersFiltered.filter(ao => State.apiOrdersPicked.has(String(ao.id || ao.order_id)));
+    if(!selected.length){ toast('กรุณาติ๊กเลือกออเดอร์ที่ต้องการพิมพ์อย่างน้อย 1 รายการ'); return; }
 
-document.getElementById('am-fetch-btn').onclick = async () => {
-  const btn = document.getElementById('am-fetch-btn');
-  btn.disabled = true; btn.textContent = '⏳ กำลังดึงข้อมูล...';
-  try{
-    const status = document.getElementById('am-status').value;
-    const stDT = parseCfgDT(document.getElementById('am-start').value);
-    const enDT = parseCfgDT(document.getElementById('am-end').value);
-    const params = new URLSearchParams({ status });
-    if(stDT) params.set('start_time', Math.floor(stDT.getTime() / 1000));
-    if(enDT) params.set('end_time', Math.floor((enDT.getTime() + 59999) / 1000));
+    const btn = document.getElementById('ap-batch-print-btn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ กำลังกดจัดส่งและดึงใบปะหน้าจาก TikTok...';
 
-    const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders?${params.toString()}`);
-    const json = await res.json();
-    if(json.code !== undefined && json.code !== 0){
-      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error));
-      btn.disabled = false; btn.textContent = '🔍 ดึงข้อมูลและกรอง';
-      return;
-    }
-    State.apiManagerOrders = json.data?.orders || [];
-    amApplyLocalFilters();
-    toast(`✅ ดึงข้อมูลสำเร็จ พบ ${State.apiManagerOrders.length} ออเดอร์`);
-  }catch(e){
-    toast('❌ เชื่อมต่อ Worker ไม่สำเร็จ: ' + e.message);
-  }
-  btn.disabled = false; btn.textContent = '🔍 ดึงข้อมูลและกรอง';
-};
+    try{
+      const packages = selected.map(ao => ({
+        order_id: String(ao.id || ao.order_id),
+        package_id: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
+        need_ship: ao.status === 'AWAITING_SHIPMENT'
+      })).filter(p => p.package_id);
 
-['am-channel','am-start','am-end'].forEach(id => document.getElementById(id).onchange = amApplyLocalFilters);
-['am-creator','am-sku','am-min-qty'].forEach(id => document.getElementById(id).oninput = amApplyLocalFilters);
-document.getElementById('am-select-all').onclick = () => { State.apiManagerPicked = new Set(State.apiManagerFiltered.map(ao => String(ao.id || ao.order_id))); amRenderList(); };
-document.getElementById('am-select-none').onclick = () => { State.apiManagerPicked.clear(); amRenderList(); };
-
-document.getElementById('am-ship-print-btn').onclick = async () => {
-  const selected = State.apiManagerFiltered.filter(ao => State.apiManagerPicked.has(String(ao.id || ao.order_id)));
-  if(!selected.length){ toast('กรุณาเลือกออเดอร์อย่างน้อย 1 รายการ'); return; }
-  const btn = document.getElementById('am-ship-print-btn');
-  btn.disabled = true; btn.textContent = '⏳ กำลังเตรียมการจัดส่ง & สร้างใบปะหน้า...';
-  try{
-    const packages = selected.map(ao => ({
-      order_id: String(ao.id || ao.order_id),
-      package_id: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
-      need_ship: ao.status === 'AWAITING_SHIPMENT'
-    })).filter(p => p.package_id);
-
-    if(!packages.length){ toast('⚠️ ออเดอร์ที่เลือกไม่มี Package ID'); btn.disabled=false; btn.textContent='🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า'; return; }
-
-    const res = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packages })
-    });
-    const json = await res.json();
-    const urls = (json.results || []).map(r => r.doc_url).filter(Boolean);
-    if(!urls.length){
-      toast('❌ ไม่สามารถดึงไฟล์ใบปะหน้าได้ ตรวจสอบสถานะใน TikTok');
-    } else {
-      toast(`✅ เตรียมจัดส่งและเปิดใบปะหน้า ${urls.length} รายการ`);
-      urls.forEach(u => window.open(u, '_blank'));
-    }
-  }catch(e){
-    toast('❌ เกิดข้อผิดพลาด: ' + e.message);
-  }
-  btn.disabled = false; btn.textContent = '🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า';
-};
-
-document.getElementById('am-picklist-btn').onclick = async () => {
-  const selected = State.apiManagerFiltered.filter(ao => State.apiManagerPicked.has(String(ao.id || ao.order_id)));
-  if(!selected.length){ toast('กรุณาเลือกออเดอร์อย่างน้อย 1 รายการ'); return; }
-  const setDefs = await loadAllSetDefs();
-  const totals = {};
-  selected.forEach(ao => {
-    (ao.line_items || ao.item_list || []).forEach(li => {
-      const code = String(li.seller_sku || li.sku_id || '').trim();
-      const name = String(li.product_name || li.sku_name || code).trim();
-      const qty = parseInt(li.quantity || li.count) || 1;
-      const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
-      const isRealBundle = setDef && setDef.components?.length && !(setDef.components.length === 1 && setDef.components[0].code === code);
-      if(isRealBundle){
-        setDef.components.forEach(c => {
-          totals[c.code] = totals[c.code] || { name: c.name || c.code, qty: 0 };
-          totals[c.code].qty += (c.qty || 1) * qty;
-        });
-      } else {
-        totals[code] = totals[code] || { name, qty: 0 };
-        totals[code].qty += qty;
+      if(!packages.length){
+        toast('⚠️ ไม่พบ Package ID ในออเดอร์ที่เลือก');
+        btn.disabled = false; btn.textContent = origText;
+        return;
       }
+
+      const res = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages })
+      });
+      const json = await res.json();
+      const results = json.results || [];
+      const docUrls = results.map(r => r.doc_url).filter(Boolean);
+
+      // อัปเดตสถานะและ Tracking Number กลับเข้า State และคิวแพ็ค PackCheck ทันที
+      const trkByOrder = {};
+      results.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
+      selected.forEach(ao => {
+        const oid = String(ao.id || ao.order_id);
+        ao.status = 'AWAITING_COLLECTION';
+        if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
+      });
+      await upsertApiOrdersToPackCheck(selected, false);
+
+      if(!docUrls.length){
+        toast('❌ TikTok ยังไม่ออกไฟล์ใบปะหน้าให้ (กรุณากดลองใหม่อีกครั้งใน 3 วินาที)');
+        btn.disabled = false; btn.textContent = origText;
+        renderApiPrintDOM();
+        return;
+      }
+
+      btn.textContent = `📄 กำลังรวมไฟล์ PDF ทั้งหมด (${docUrls.length} ใบ)...`;
+
+      // ใช้ PDFLib รวมไฟล์ PDF ทุกออเดอร์ให้เป็นไฟล์ PDF เดียวกัน!
+      if(typeof PDFLib !== 'undefined'){
+        const mergedPdf = await PDFLib.PDFDocument.create();
+        for(const u of docUrls){
+          try{
+            const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
+            const pdfBytes = await pdfResp.arrayBuffer();
+            const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
+            const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+            copiedPages.forEach(p => mergedPdf.addPage(p));
+          }catch(e){ console.error('Failed to merge one PDF page', e); }
+        }
+        const mergedBytes = await mergedPdf.save();
+        const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+        toast(`✅ รวมใบปะหน้า ${docUrls.length} ออเดอร์เป็นไฟล์เดียวเรียบร้อย!`);
+      } else {
+        window.open(docUrls[0], '_blank');
+      }
+
+      renderApiPrintDOM();
+    }catch(err){
+      toast('❌ เกิดข้อผิดพลาด: ' + err.message);
+      btn.disabled = false; btn.textContent = origText;
+    }
+  };
+
+  // 2) พิมพ์ใบสรุปหยิบของ (Pick List)
+  document.getElementById('ap-picklist-btn').onclick = async () => {
+    const selected = State.apiOrdersFiltered.filter(ao => State.apiOrdersPicked.has(String(ao.id || ao.order_id)));
+    if(!selected.length){ toast('กรุณาติ๊กเลือกออเดอร์อย่างน้อย 1 รายการ'); return; }
+    const setDefs = await loadAllSetDefs();
+    const totals = {};
+    selected.forEach(ao => {
+      (ao.line_items || ao.item_list || []).forEach(li => {
+        const code = String(li.seller_sku || li.sku_id || '').trim();
+        const name = String(li.product_name || li.sku_name || code).trim();
+        const qty = parseInt(li.quantity || li.count) || 1;
+        const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
+        const isRealBundle = setDef && setDef.components?.length && !(setDef.components.length === 1 && setDef.components[0].code === code);
+        if(isRealBundle){
+          setDef.components.forEach(c => {
+            totals[c.code] = totals[c.code] || { name: c.name || c.code, qty: 0 };
+            totals[c.code].qty += (c.qty || 1) * qty;
+          });
+        } else {
+          totals[code] = totals[code] || { name, qty: 0 };
+          totals[code].qty += qty;
+        }
+      });
     });
-  });
 
-  const rowsHtml = Object.entries(totals).map(([code, info]) =>
-    `<tr><td style="padding:8px;border:1px solid #ccc;font-family:monospace">${esc(code)}</td><td style="padding:8px;border:1px solid #ccc">${esc(info.name)}</td><td style="padding:8px;border:1px solid #ccc;text-align:right;font-weight:bold;font-size:18px">${info.qty}</td></tr>`
-  ).join('');
+    const rowsHtml = Object.entries(totals).map(([code, info]) =>
+      `<tr><td style="padding:8px;border:1px solid #ccc;font-family:monospace">${esc(code)}</td><td style="padding:8px;border:1px solid #ccc">${esc(info.name)}</td><td style="padding:8px;border:1px solid #ccc;text-align:right;font-weight:bold;font-size:18px">${info.qty}</td></tr>`
+    ).join('');
 
-  const w = window.open('', '_blank');
-  w.document.write(`<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>ใบสรุปหยิบของ (Pick List)</title>
-  <style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#f2f2f2;padding:8px;border:1px solid #ccc;text-align:left}</style></head>
-  <body><h2>📋 ใบสรุปหยิบสินค้า (Pick List)</h2>
-  <p>จำนวนออเดอร์ที่เลือก: <b>${selected.length}</b> ออเดอร์ · พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</p>
-  <table><thead><tr><th>SKU</th><th>ชื่อสินค้า (แตกเซทแล้ว)</th><th style="text-align:right">จำนวนหยิบ</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-  <script>window.onload=()=>window.print();<\/script></body></html>`);
-  w.document.close();
-};
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>ใบสรุปหยิบของ (Pick List)</title>
+    <style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#f2f2f2;padding:8px;border:1px solid #ccc;text-align:left}</style></head>
+    <body><h2>📋 ใบสรุปหยิบสินค้า (Pick List)</h2>
+    <p>จำนวนออเดอร์ที่เลือก: <b>${selected.length}</b> ออเดอร์ · พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</p>
+    <table><thead><tr><th>SKU</th><th>ชื่อสินค้า (แตกเซทแล้ว)</th><th style="text-align:right">จำนวนหยิบ</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+    <script>window.onload=()=>window.print();<\/script></body></html>`);
+    w.document.close();
+  };
+}
 
-document.getElementById('am-sync-queue-btn').onclick = async () => {
-  const selected = State.apiManagerFiltered.filter(ao => State.apiManagerPicked.has(String(ao.id || ao.order_id)));
-  if(!selected.length){ toast('กรุณาเลือกออเดอร์อย่างน้อย 1 รายการ'); return; }
+function updateApListOnly(){
+  // Helper to re-render list without losing input focus while typing in filter box
+  const container = document.getElementById('ap-orders-container');
+  if(!container) return;
+  renderApiPrintDOM();
+}
+
+// ฟังก์ชันซิงค์และอัปเดตเลขพัสดุเข้าคิวแพ็คของ PackCheck อัตโนมัติ (ทั้งออเดอร์ใหม่ และอัปเดต Tracking ให้ออเดอร์เดิม)
+async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false){
+  if(!apiOrdersList || !apiOrdersList.length) return;
   const setDefs = await loadAllSetDefs();
   const date = State.date || todayStr();
   const existingEntries = await getExistingOrderEntries(date);
@@ -6142,9 +6224,27 @@ document.getElementById('am-sync-queue-btn').onclick = async () => {
 
   const writeEntries = [];
   let newCount = 0;
-  for(const ao of selected){
+  let updatedTrkCount = 0;
+
+  for(const ao of apiOrdersList){
     const orderId = String(ao.id || ao.order_id || '');
-    if(!orderId || existingMap[orderId]) continue;
+    if(!orderId) continue;
+    const newTracking = ao.tracking_number || ao.packages?.[0]?.tracking_number || '';
+    const newPkgId = ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '';
+
+    if(existingMap[orderId]){
+      // ถ้าออเดอร์มีอยู่แล้ว แต่ยังไม่มีเลขพัสดุ (หรือเพิ่งกดรับแล้วได้เลขพัสดุใหม่) ให้อัปเดตเลขพัสดุทันที!
+      const prev = existingMap[orderId];
+      let changed = false;
+      if(newTracking && prev.tracking !== newTracking){ prev.tracking = newTracking; changed = true; updatedTrkCount++; }
+      if(newPkgId && !prev.packageId){ prev.packageId = newPkgId; changed = true; }
+      if(changed){
+        prev.updatedAt = Date.now();
+        writeEntries.push({ key: orderKey(date, orderId), value: JSON.stringify(prev) });
+      }
+      continue;
+    }
+
     const items = [];
     const orderedSkus = [];
     const lineItems = ao.line_items || ao.item_list || [];
@@ -6153,6 +6253,7 @@ document.getElementById('am-sync-queue-btn').onclick = async () => {
       const name = String(li.product_name || li.sku_name || code).trim();
       const qty = parseInt(li.quantity || li.count) || 1;
       orderedSkus.push({ code, name, qty });
+
       const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
       const isRealBundle = setDef && setDef.components?.length && !(setDef.components.length === 1 && setDef.components[0].code === code);
       if(isRealBundle){
@@ -6171,9 +6272,9 @@ document.getElementById('am-sync-queue-btn').onclick = async () => {
     const creator = ao.creator_username || ao.creator_handle || lineItems[0]?.creator_username || '';
     const orderObj = {
       orderId,
-      packageId: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
+      packageId: newPkgId,
       customer: ao.recipient_address?.name || ao.buyer_email || 'ลูกค้า TikTok',
-      tracking: ao.tracking_number || '',
+      tracking: newTracking,
       orderDate: ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH') : '',
       source: creator ? 'LIVE' : 'TikTok Shop API',
       creator,
@@ -6189,14 +6290,11 @@ document.getElementById('am-sync-queue-btn').onclick = async () => {
   if(writeEntries.length > 0){
     await sBatchSet(writeEntries);
     await addDateToIndex(date);
-    toast(`🎉 นำเข้าคิวแพ็คสำเร็จ ${newCount} ออเดอร์!`);
-    document.getElementById('api-manager-modal').classList.remove('show');
-    await refreshStaffList();
-    render();
-  } else {
-    toast('✅ ออเดอร์ที่เลือกอยู่ในคิวแพ็คทั้งหมดแล้ว');
+    if(!silent){
+      toast(`✅ ซิงค์ออเดอร์ใหม่ ${newCount} ใบ` + (updatedTrkCount ? ` · อัปเดตเลขพัสดุ ${updatedTrkCount} ใบ` : ''));
+    }
   }
-};
+}
 
 </script>
 </body>
