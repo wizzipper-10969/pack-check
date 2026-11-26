@@ -5425,7 +5425,7 @@ async function importSetsFromFile(file){
 
 <script>
 // ⚙️ ตั้งค่า URL ของ Cloudflare Worker ที่คุณ Deploy ไว้ตรงนี้
-const TIKTOK_WORKER_URL = 'https://bp-tiktok-sync.wizambition10969.workers.dev';
+const TIKTOK_WORKER_URL = 'https://bp-tiktok-syncworkersdev.bandpthaibrandgroupcompany.workers.dev';
 
 const _origSetTab = setTab;
 setTab = function(tab){
@@ -5447,15 +5447,22 @@ async function syncOrdersFromTikTokApi(){
   try{
     const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders`);
     const json = await res.json();
-    if(json.code !== 0 || !json.data?.orders){
+    
+    if(json.code !== 0 && json.error){
       toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error || 'กรุณาตรวจสอบการเชื่อมต่อร้านค้า'));
       return;
     }
-    const apiOrders = json.data.orders;
-    if(apiOrders.length === 0){
-      toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
+    
+    const apiOrders = json.data?.orders || json.data?.order_list || json.orders || json.data || [];
+    if(!Array.isArray(apiOrders) || apiOrders.length === 0){
+      if(json.code !== 0 && json.message){
+        toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + json.message);
+      } else {
+        toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
+      }
       return;
     }
+
     const setDefs = await loadAllSetDefs();
     const date = State.date || todayStr();
     const existingEntries = await getExistingOrderEntries(date);
@@ -5466,15 +5473,15 @@ async function syncOrdersFromTikTokApi(){
     let newCount = 0;
 
     for(const ao of apiOrders){
-      const orderId = String(ao.id);
-      if(existingMap[orderId]) continue;
+      const orderId = String(ao.id || ao.order_id || '');
+      if(!orderId || existingMap[orderId]) continue;
 
       const items = [];
       const orderedSkus = [];
-      (ao.line_items || []).forEach(li => {
+      (ao.line_items || ao.item_list || []).forEach(li => {
         const code = String(li.seller_sku || li.sku_id || '').trim();
-        const name = String(li.product_name || code).trim();
-        const qty = parseInt(li.quantity) || 1;
+        const name = String(li.product_name || li.sku_name || code).trim();
+        const qty = parseInt(li.quantity || li.count) || 1;
         orderedSkus.push({ code, name, qty });
 
         const setDef = setDefs.byCode[code] || setDefs.byName[normName(name)];
@@ -5494,7 +5501,7 @@ async function syncOrdersFromTikTokApi(){
 
       const orderObj = {
         orderId,
-        packageId: ao.packages?.[0]?.id || '',
+        packageId: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
         customer: ao.recipient_address?.name || ao.buyer_email || 'ลูกค้า TikTok',
         tracking: ao.tracking_number || '',
         orderDate: ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH') : '',
