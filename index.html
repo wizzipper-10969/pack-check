@@ -297,6 +297,24 @@
   .modal-card input[type=text]{font-size:15px;}
   .modal-card .row > *{width:auto;}
   .modal-card.wide{max-width:520px;}
+  /* ---- รวบออเดอร์ลูกค้าเดียวกัน ---- */
+  .mg-tabs{display:flex;gap:6px;margin-bottom:12px;}
+  .mg-tabs button{flex:1;min-height:38px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-weight:700;font-size:13px;color:var(--muted);cursor:pointer;}
+  .mg-tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .mg-group{border:1.5px solid var(--border);border-radius:16px;padding:12px;margin-bottom:10px;background:#fbfaff;}
+  .mg-group.weak{background:#fffaf0;border-color:#f3d9a4;}
+  .mg-gh{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;}
+  .mg-gname{font-weight:800;font-size:14.5px;word-break:break-word;}
+  .mg-gaddr{font-size:11.5px;color:var(--muted);margin-top:1px;word-break:break-word;}
+  .mg-warn{font-size:11.5px;color:#b45309;font-weight:700;margin:2px 0 4px;}
+  .mg-line{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px dashed rgba(0,0,0,.09);cursor:pointer;}
+  .mg-line input{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex-shrink:0;}
+  .mg-line .mg-it{font-size:12px;color:var(--text);margin-top:2px;line-height:1.45;}
+  .mg-chip{display:inline-block;background:#ede9fe;color:#5b21b6;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;margin-top:3px;}
+  .mg-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:16px;padding:10px 12px;margin-bottom:12px;}
+  .mg-banner .t{font-size:13px;font-weight:700;color:#4c1d95;flex:1;min-width:180px;}
+  .mg-banner .btn{width:auto;min-height:38px;padding:8px 14px;font-size:13px;}
+  .mg-card{background:#f5f3ff;border:1.5px solid #ddd6fe;}
   .eo-list{max-height:46vh;overflow-y:auto;margin-bottom:10px;padding-right:2px;}
   .eo-row{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:10px;margin-bottom:8px;}
   .eo-row .thumb{width:44px;height:44px;border-radius:12px;object-fit:cover;flex-shrink:0;background:#fff;}
@@ -920,6 +938,18 @@
         <button class="btn secondary" id="pz-cancel">ยกเลิก</button>
         <button class="btn" id="pz-save">บันทึก</button>
       </div>
+    </div>
+  </div>
+  <div id="merge-modal" class="modal-overlay">
+    <div class="modal-card wide" style="max-width:600px">
+      <div class="modal-title">🔗 รวบออเดอร์ลูกค้าเดียวกัน</div>
+      <div class="modal-desc">ลูกค้าคนเดียวกัน (ชื่อ/เบอร์/ที่อยู่ตรงกัน) ที่สั่งแยกหลายออเดอร์ รวบเป็นรายการแพ็คเดียว ส่งกล่องเดียว — สแกนเลขพัสดุของออเดอร์ไหนก็เปิดออเดอร์รวมได้</div>
+      <div class="mg-tabs">
+        <button id="mg-tab-auto" class="on">✨ ที่ระบบแนะนำ</button>
+        <button id="mg-tab-manual">☑️ เลือกเอง</button>
+      </div>
+      <div id="mg-body"></div>
+      <div class="row" style="margin-top:12px"><button class="btn secondary" id="mg-close">ปิด</button></div>
     </div>
   </div>
   <div id="edit-order-modal" class="modal-overlay">
@@ -2059,6 +2089,7 @@ async function refreshStaffList(){
 }
 
 function renderStaffList(){
+  const mgIdx = mgIndex(State.orders);
   const dateOptions = State.dates.length
     ? State.dates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('')
     : `<option>ยังไม่มีข้อมูล</option>`;
@@ -2093,6 +2124,7 @@ function renderStaffList(){
           ${liveBadgeHtml(o,true)}
           ${o.tracking ? `<div class="mono muted" style="font-size:11px;margin-top:1px">📦 ${esc(o.tracking)}</div>` : ''}
           ${Array.isArray(o.originalOrderIds) ? `<div class="muted" style="font-size:11px;margin-top:1px">🔗 รวม ${o.originalOrderIds.length} ออเดอร์</div>` : ''}
+          ${mgIdx[o.orderId] ? `<div><span class="mg-chip">👥 ลูกค้าเดียวกันสั่งแยกอีก ${mgIdx[o.orderId]} ออเดอร์</span></div>` : ''}
           ${orderInfoLine(o,11,1)}
         </div>
         <div style="text-align:right">
@@ -2159,6 +2191,7 @@ function renderStaffList(){
       ${cancelled>0 ? `<div class="stat"><div class="num" style="color:var(--danger)">${cancelled}</div><div class="lbl">ยกเลิก</div></div>` : ''}
     </div>
     ${summaryCard}
+    ${mgBannerHtml()}
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
     <div id="order-list">${listHtml}</div>
   `;
@@ -2248,6 +2281,8 @@ function wireStaffList(){
       exportPhotosBtn.textContent = old;
     };
   }
+  const mgOpenBtn = document.getElementById('mg-open-btn');
+  if(mgOpenBtn){ mgOpenBtn.onclick = () => openMergeModal('auto'); }
   const summaryToggle = document.getElementById('summary-toggle');
   if(summaryToggle){
     summaryToggle.onclick = () => {
@@ -2657,6 +2692,7 @@ function renderDetail(){
         ${st==='cancelled' ? '' : `<button class="btn secondary" id="add-gift-btn" style="border-color:#f59e0b;color:#b45309">🎁 เพิ่มของแถม</button>`}
         <button class="btn secondary" id="detail-issue-btn" style="color:#b91c1c;border-color:rgba(239,68,68,0.35)">${issueText}</button>
         <button class="btn secondary" id="detail-print-label-btn" style="color:var(--accent);border-color:rgba(79,107,237,0.35)">🖨️ ใบปะหน้า API</button>
+        ${mgEligible(o) ? `<button class="btn secondary" id="merge-this-btn" style="color:#5b21b6;border-color:#c4b5fd">🔗 รวบกับออเดอร์อื่น</button>` : ''}
       </div>
       <div style="margin-top:8px">${cancelBtnHtml}</div>
     </div>
@@ -2678,6 +2714,7 @@ function renderDetail(){
       <div class="pack-prog-bar"><div class="pack-prog-fill" style="width:${pct}%"></div></div>
     </div>
 
+    ${mgDetailCardHtml(o)}
     ${doneBanner}
     ${cancelledBanner}
     ${scanSection}
@@ -2688,6 +2725,10 @@ function renderDetail(){
 }
 
 function wireDetail(){
+  const mgThis = document.getElementById('merge-this-btn');
+  if(mgThis){ mgThis.onclick = () => openMergeModal('manual', State.currentOrder.orderId); }
+  const mgUn = document.getElementById('unmerge-btn');
+  if(mgUn){ mgUn.onclick = () => mgUnmergeCurrent(); }
   document.getElementById('back-btn').onclick = async () => {
     await stopCamera();
     State.staffSub = 'list';
@@ -3031,7 +3072,7 @@ function selectProduct(code, name){
 async function handleOrderLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
-  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
+  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)) || mgHasMemberTracking(o, code));
   if(!match){
     // fallback: loose contains-match, in case the scanned QR/barcode has extra characters around the number
     match = State.orders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
@@ -3241,7 +3282,7 @@ async function handleVerifyLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
   lastVerifyScanAt = Date.now();
-  let match = State.verifyOrders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
+  let match = State.verifyOrders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)) || mgHasMemberTracking(o, code));
   if(!match){
     match = State.verifyOrders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
   }
@@ -5357,6 +5398,392 @@ async function importSetsFromFile(file){
 }
 
 
+
+/* ============ MERGE ORDERS (รวบออเดอร์ลูกค้าเดียวกัน) ============
+   ลูกค้าคนเดียวสั่งแยกหลายออเดอร์ → รวบเป็นเอกสารออเดอร์เดียว ("A + B") ใช้โครงสร้างเดียวกับออเดอร์ที่รวมตามเลขพัสดุ
+   (originalOrderIds) ส่วน mergedMembers เก็บสำเนาของแต่ละออเดอร์ไว้ เพื่อให้กด "แยกออเดอร์กลับ" ได้ */
+State.mg = { tab: 'auto', picks: new Set(), unchecked: new Set(), search: '', open: false };
+
+function mgNorm(s){ return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim(); }
+function mgIds(o){ return (Array.isArray(o.originalOrderIds) && o.originalOrderIds.length) ? o.originalOrderIds : [o.orderId]; }
+function mgHasMemberTracking(o, code){ return !!(o.memberTrackings && Object.values(o.memberTrackings).includes(code)); }
+
+// ผู้รับจาก TikTok API → คีย์จับคู่ลูกค้า (strong = มีชื่อ + เบอร์/ที่อยู่/ไปรษณีย์ ตรงกัน)
+function mgBuyerFromApi(ao){
+  const ra = ao.recipient_address || {};
+  const name = mgNorm(ra.name);
+  const phone = String(ra.phone_number || ra.phone || '').replace(/\D/g, '');
+  const post = String(ra.postal_code || '').replace(/\D/g, '');
+  const addr = mgNorm(ra.full_address || ra.address_detail || ra.address_line1 || '');
+  if(name && (phone || addr || post)) return { key: 'a:' + name + '|' + phone + '|' + post + '|' + addr.slice(0, 80), strong: true };
+  const uid = String(ao.user_id || ao.buyer_user_id || '').trim();
+  if(uid) return { key: 'u:' + uid, strong: true };
+  if(name && name.indexOf('*') < 0) return { key: 'n:' + name, strong: false };
+  return { key: '', strong: false };
+}
+function mgBuyerFields(ao){
+  const b = mgBuyerFromApi(ao);
+  if(!b.key) return {};
+  const ra = ao.recipient_address || {};
+  const addr = String(ra.full_address || ra.address_detail || '').trim().slice(0, 120);
+  return { buyerKey: b.key, buyerStrong: b.strong, ...(addr ? { shipAddr: addr } : {}) };
+}
+// คีย์ลูกค้าของออเดอร์ที่อยู่ในคิวแพ็ค (ออเดอร์เก่าที่ไม่มีคีย์ → ใช้ชื่ออย่างเดียว = จับคู่แบบไม่แน่นอน)
+function mgDocKey(o){
+  if(o.buyerKey) return { key: o.buyerKey, strong: !!o.buyerStrong };
+  const n = mgNorm(o.customer);
+  if(!n || n.indexOf('*') >= 0 || n === mgNorm('ลูกค้า TikTok') || n === '-') return { key: '', strong: false };
+  return { key: 'n:' + n, strong: false };
+}
+function mgEligible(o){
+  if(!o || o.cancelled) return false;
+  return orderStatus(o) !== 'done'; // ออเดอร์ที่แพ็คครบแล้วไม่ควรรวบ
+}
+function mgFindGroups(orders){
+  const map = {};
+  orders.filter(mgEligible).forEach(o => {
+    const k = mgDocKey(o);
+    if(!k.key) return;
+    (map[k.key] = map[k.key] || { key: k.key, strong: k.strong, orders: [] }).orders.push(o);
+  });
+  return Object.values(map).filter(g => g.orders.length >= 2)
+    .sort((a, b) => (b.strong - a.strong) || (b.orders.length - a.orders.length));
+}
+function mgIndex(orders){ // orderId -> จำนวนออเดอร์อื่นของลูกค้าคนเดียวกันที่ยังรวบได้
+  const idx = {};
+  mgFindGroups(orders || []).forEach(g => g.orders.forEach(o => { idx[o.orderId] = g.orders.length - 1; }));
+  return idx;
+}
+function mgBannerHtml(){
+  if(!State.orders.length) return '';
+  const groups = mgFindGroups(State.orders);
+  const n = groups.reduce((s, g) => s + g.orders.length, 0);
+  const txt = groups.length
+    ? `👥 พบลูกค้าคนเดียวกันสั่งแยกออเดอร์ <b>${groups.length}</b> กลุ่ม (${n} ออเดอร์) — รวบเป็นกล่องเดียวได้`
+    : `🔗 ลูกค้าสั่งแยกออเดอร์? เลือกออเดอร์มารวบเป็นกล่องเดียวได้`;
+  return `<div class="mg-banner"><div class="t">${txt}</div><button class="btn" id="mg-open-btn">🔗 รวบออเดอร์</button></div>`;
+}
+function mgItemsSummary(o){
+  const its = (o.items || []);
+  const head = its.slice(0, 3).map(i => esc(i.name || i.code) + ' ×' + (i.qtyRequired || 0)).join(' · ');
+  return head + (its.length > 3 ? ' · +' + (its.length - 3) + ' รายการ' : '');
+}
+function mgLineHtml(o, checked, attr){
+  const prog = orderProgress(o);
+  return `<label class="mg-line">
+    <input type="checkbox" ${attr} ${checked ? 'checked' : ''}>
+    <div style="min-width:0;flex:1">
+      <div><span class="mono" style="font-weight:700;font-size:12.5px;word-break:break-all">${esc(o.orderId)}</span>
+        ${Array.isArray(o.originalOrderIds) && o.originalOrderIds.length > 1 ? `<span class="mg-chip">รวมแล้ว ${o.originalOrderIds.length}</span>` : ''}
+        ${prog.scanned > 0 ? `<span class="pill progress" style="margin-left:4px">แพ็คแล้ว ${prog.scanned}/${prog.total}</span>` : ''}</div>
+      <div class="muted" style="font-size:11.5px">${esc(o.customer || '-')}${o.orderDate ? ' · 🕒 ' + esc(o.orderDate) : ''}${o.tracking ? ' · 📦 ' + esc(o.tracking) : ''}</div>
+      <div class="mg-it">${mgItemsSummary(o)}</div>
+    </div>
+  </label>`;
+}
+
+function openMergeModal(tab, preselectId){
+  State.mg.tab = tab || 'auto';
+  State.mg.search = '';
+  State.mg.unchecked = new Set();
+  State.mg.picks = new Set(preselectId ? [preselectId] : []);
+  State.mg.fromDetail = State.staffSub === 'detail';
+  State.mg.open = true;
+  document.getElementById('merge-modal').classList.add('show');
+  mgRender();
+}
+function closeMergeModal(){
+  State.mg.open = false;
+  document.getElementById('merge-modal').classList.remove('show');
+}
+function mgRender(){
+  const body = document.getElementById('mg-body');
+  if(!body) return;
+  document.getElementById('mg-tab-auto').classList.toggle('on', State.mg.tab === 'auto');
+  document.getElementById('mg-tab-manual').classList.toggle('on', State.mg.tab === 'manual');
+
+  if(State.mg.tab === 'auto'){
+    const groups = mgFindGroups(State.orders);
+    if(!groups.length){
+      body.innerHTML = `<div class="empty" style="padding:22px 8px">ยังไม่พบลูกค้าที่สั่งแยกออเดอร์<br><span class="muted" style="font-size:12.5px">ระบบจับคู่จากชื่อ + เบอร์/ที่อยู่ผู้รับ — ถ้าต้องการรวบเอง ใช้แท็บ "เลือกเอง"</span></div>`;
+      return;
+    }
+    const strongCount = groups.filter(g => g.strong).length;
+    body.innerHTML = groups.map(g => {
+      const first = g.orders[0];
+      const addr = g.orders.map(o => o.shipAddr).find(Boolean) || '';
+      const checkedN = g.orders.filter(o => !State.mg.unchecked.has(o.orderId)).length;
+      return `<div class="mg-group ${g.strong ? '' : 'weak'}">
+        <div class="mg-gh">
+          <div style="min-width:0">
+            <div class="mg-gname">👤 ${esc(first.customer || '-')} <span class="muted" style="font-weight:600;font-size:12px">· ${g.orders.length} ออเดอร์</span></div>
+            ${addr ? `<div class="mg-gaddr">📍 ${esc(addr)}</div>` : ''}
+            ${g.strong ? '' : `<div class="mg-warn">⚠️ ตรงกันเฉพาะชื่อ (ไม่มีข้อมูลที่อยู่) — ตรวจให้แน่ใจว่าเป็นคนเดียวกันก่อนรวบ</div>`}
+          </div>
+          <button class="btn" data-mg-group="${esc(g.key)}" style="width:auto;min-height:36px;padding:6px 12px;font-size:12.5px;flex-shrink:0" ${checkedN < 2 ? 'disabled' : ''}>🔗 รวบ ${checkedN}</button>
+        </div>
+        ${g.orders.map(o => mgLineHtml(o, !State.mg.unchecked.has(o.orderId), `data-mg-chk="${esc(o.orderId)}"`)).join('')}
+      </div>`;
+    }).join('') + (strongCount > 1 ? `<button class="btn secondary" id="mg-all-btn" style="width:100%">🔗 รวบทุกกลุ่มที่ตรงกันครบ (${strongCount} กลุ่ม)</button>` : '');
+    return;
+  }
+
+  // manual
+  const q = mgNorm(State.mg.search);
+  const list = State.orders.filter(mgEligible).filter(o => !q ||
+    o.orderId.toLowerCase().includes(q) || mgNorm(o.customer).includes(q) || mgNorm(o.tracking).includes(q));
+  const picked = State.orders.filter(o => State.mg.picks.has(o.orderId) && mgEligible(o));
+  body.innerHTML = `
+    <input type="text" id="mg-search" placeholder="ค้นหา Order ID / ชื่อลูกค้า / เลขพัสดุ..." value="${esc(State.mg.search)}" autocomplete="off">
+    <div style="max-height:44vh;overflow-y:auto;margin-bottom:10px">
+      ${list.length ? list.map(o => mgLineHtml(o, State.mg.picks.has(o.orderId), `data-mg-pick="${esc(o.orderId)}"`)).join('') : '<div class="empty">ไม่พบออเดอร์</div>'}
+    </div>
+    <button class="btn" id="mg-manual-btn" ${picked.length < 2 ? 'disabled' : ''}>🔗 รวบที่เลือก (${picked.length} ออเดอร์)</button>`;
+}
+
+async function mgDoMerge(docs){
+  const date = State.date;
+  const ids = [];
+  docs.forEach(o => mgIds(o).forEach(id => { if(!ids.includes(id)) ids.push(id); }));
+  ids.sort();
+  const mergedId = ids.join(' + ');
+  const members = [];
+  docs.forEach(o => {
+    if(Array.isArray(o.mergedMembers) && o.mergedMembers.length){ o.mergedMembers.forEach(m => members.push(m)); return; }
+    members.push({
+      orderId: o.orderId, customer: o.customer || '', tracking: o.tracking || '', packageId: o.packageId || '',
+      orderDate: o.orderDate || '', source: o.source || '', creator: o.creator || '',
+      buyerKey: o.buyerKey || '', buyerStrong: !!o.buyerStrong, shipAddr: o.shipAddr || '',
+      orderedSkus: o.orderedSkus || [],
+      items: (o.items || []).map(it => ({ code: it.code, name: it.name, qtyRequired: it.qtyRequired || 0, ...(it.gift ? { gift: true } : {}) }))
+    });
+  });
+  const primary = docs.find(o => o.tracking) || docs[0];
+  const items = [];
+  docs.forEach(o => (o.items || []).forEach(it => {
+    const ex = items.find(x => x.code === it.code && !!x.gift === !!it.gift);
+    if(ex){
+      ex.qtyRequired += it.qtyRequired || 0;
+      ex.qtyScanned += it.qtyScanned || 0;
+      if(it.qtyVerified) ex.qtyVerified = (ex.qtyVerified || 0) + it.qtyVerified;
+    } else {
+      items.push({ code: it.code, name: it.name, qtyRequired: it.qtyRequired || 0, qtyScanned: it.qtyScanned || 0,
+        ...(it.qtyVerified ? { qtyVerified: it.qtyVerified } : {}), ...(it.gift ? { gift: true } : {}) });
+    }
+  }));
+  const memberTrackings = {};
+  members.forEach(m => { if(m.tracking) memberTrackings[m.orderId] = m.tracking; });
+  docs.forEach(o => Object.assign(memberTrackings, o.memberTrackings || {}));
+  const orderedSkus = [];
+  docs.forEach(o => (o.orderedSkus || []).forEach(s => {
+    const ex = orderedSkus.find(a => a.code === s.code);
+    if(ex) ex.qty += s.qty; else orderedSkus.push({ code: s.code, name: s.name, qty: s.qty });
+  }));
+  let log = [];
+  docs.forEach(o => { if(Array.isArray(o.activityLog)) log = log.concat(o.activityLog); });
+  if(log.length > 300) log = log.slice(-300);
+
+  const merged = {
+    orderId: mergedId,
+    customer: docs.map(o => o.customer).find(Boolean) || '',
+    orderDate: primary.orderDate || docs.map(o => o.orderDate).find(Boolean) || '',
+    source: docs.map(o => o.source).find(Boolean) || '',
+    creator: docs.map(o => o.creator).find(Boolean) || '',
+    tracking: primary.tracking || '',
+    packageId: primary.packageId || '',
+    originalOrderIds: ids,
+    mergedMembers: members,
+    memberTrackings,
+    buyerKey: docs.map(o => o.buyerKey).find(Boolean) || '',
+    buyerStrong: docs.some(o => o.buyerStrong),
+    shipAddr: docs.map(o => o.shipAddr).find(Boolean) || '',
+    orderedSkus,
+    items,
+    status: 'pending',
+    mergedManually: true,
+    mergedAt: Date.now(),
+    mergedBy: State.staffName || '',
+    ...(log.length ? { activityLog: log } : {}),
+    ...(docs.find(o => o.packedBy) ? { packedBy: docs.find(o => o.packedBy).packedBy } : {}),
+    ...(docs.some(o => o.itemsManuallyEdited) ? { itemsManuallyEdited: true } : {})
+  };
+  await saveOrder(date, merged);
+  await sBatchDelete(docs.filter(o => o.orderId !== mergedId).map(o => orderKey(date, o.orderId)));
+  return merged;
+}
+
+async function mgAfterMerge(lastMerged, msg){
+  toast(msg);
+  await refreshStaffList();
+  if(State.mg.fromDetail && lastMerged){
+    closeMergeModal();
+    try{ await openOrder(lastMerged.orderId); return; }catch(e){ console.error(e); }
+  }
+  if(State.view === 'staff' && State.staffSub === 'list'){
+    document.getElementById('main').innerHTML = renderStaffList();
+    wireStaffList();
+  }
+  if(State.mg.open) mgRender();
+}
+
+async function mgMergeIds(orderIds, confirmWeak){
+  const docs = State.orders.filter(o => orderIds.includes(o.orderId) && mgEligible(o));
+  if(docs.length < 2){ toast('ต้องเลือกอย่างน้อย 2 ออเดอร์'); return; }
+  const keys = new Set(docs.map(o => mgDocKey(o).key).filter(Boolean));
+  const names = new Set(docs.map(o => mgNorm(o.customer)));
+  if(confirmWeak || keys.size > 1 || names.size > 1){
+    const who = [...new Set(docs.map(o => o.customer || '-'))].join(' / ');
+    if(!confirm('ออเดอร์เหล่านี้อาจไม่ใช่ลูกค้าคนเดียวกัน (' + who + ')\nรวบเป็นพัสดุเดียวกันต่อไปหรือไม่?')) return;
+  }
+  const lastDone = docs.some(o => orderProgress(o).scanned > 0);
+  if(lastDone && !confirm('มีออเดอร์ที่เริ่มแพ็คไปแล้ว ระบบจะรวมจำนวนที่แพ็คแล้วเข้าด้วยกัน รวบต่อหรือไม่?')) return;
+  try{
+    const merged = await mgDoMerge(docs);
+    await mgAfterMerge(merged, '🔗 รวบ ' + docs.length + ' ออเดอร์เป็นพัสดุเดียวแล้ว');
+  }catch(err){
+    console.error('merge failed', err);
+    toast('❌ รวบออเดอร์ไม่สำเร็จ: ' + (err.message || err));
+  }
+}
+
+function mgCanUnmerge(o){
+  return Array.isArray(o.mergedMembers) && o.mergedMembers.length >= 2 && o.mergedMembers.every(m => String(m.orderId).indexOf(' + ') < 0);
+}
+function mgDetailCardHtml(o){
+  if(!Array.isArray(o.originalOrderIds) || o.originalOrderIds.length < 2) return '';
+  const members = Array.isArray(o.mergedMembers) && o.mergedMembers.length ? o.mergedMembers : null;
+  const lines = members
+    ? members.map(m => {
+        const trk = (o.memberTrackings && o.memberTrackings[m.orderId]) || m.tracking || '';
+        const its = (m.items || []).map(i => esc(i.name || i.code) + ' ×' + i.qtyRequired).join(' · ');
+        return `<div style="padding:6px 0;border-top:1px dashed rgba(0,0,0,.1)"><div class="mono" style="font-weight:700;font-size:12.5px;word-break:break-all">${esc(m.orderId)}${trk ? ' · 📦 ' + esc(trk) : ''}</div><div class="muted" style="font-size:11.5px;line-height:1.45">${its}</div></div>`;
+      }).join('')
+    : o.originalOrderIds.map(id => `<div class="mono" style="padding:4px 0;font-size:12.5px">${esc(id)}</div>`).join('');
+  return `<div class="card mg-card" style="margin-bottom:12px">
+    <div style="font-weight:800;font-size:13.5px;color:#4c1d95">🔗 ออเดอร์รวม ${o.originalOrderIds.length} ออเดอร์ — ส่งกล่องเดียว</div>
+    ${lines}
+    ${mgCanUnmerge(o) ? `<button class="btn secondary" id="unmerge-btn" style="margin-top:8px">↩️ แยกออเดอร์กลับ</button>` : ''}
+  </div>`;
+}
+async function mgUnmergeCurrent(){
+  const o = State.currentOrder;
+  if(!o || !mgCanUnmerge(o)) return;
+  const prog = orderProgress(o);
+  const warn = (prog.scanned > 0 ? 'จำนวนที่แพ็คไปแล้ว (' + prog.scanned + ' ชิ้น) จะถูกรีเซ็ต และ' : '') + 'รายการ/ของแถมที่แก้ไขหลังรวบจะไม่ถูกย้อนกลับ';
+  if(!confirm('แยกออเดอร์รวมนี้กลับเป็น ' + o.mergedMembers.length + ' ออเดอร์เดิมหรือไม่?\n' + warn)) return;
+  const date = State.date;
+  try{
+    const entries = o.mergedMembers.map(m => ({
+      key: orderKey(date, m.orderId),
+      value: JSON.stringify({
+        orderId: m.orderId, packageId: m.packageId || '', customer: m.customer || '',
+        tracking: (o.memberTrackings && o.memberTrackings[m.orderId]) || m.tracking || '',
+        orderDate: m.orderDate || '', source: m.source || '', creator: m.creator || '',
+        buyerKey: m.buyerKey || '', buyerStrong: !!m.buyerStrong, shipAddr: m.shipAddr || '',
+        orderedSkus: m.orderedSkus || [],
+        items: (m.items || []).map(it => ({ ...it, qtyScanned: 0 })),
+        status: 'pending', updatedAt: Date.now()
+      })
+    }));
+    await sBatchSet(entries);
+    await sBatchDelete([orderKey(date, o.orderId)]);
+    toast('↩️ แยกเป็น ' + entries.length + ' ออเดอร์เดิมแล้ว');
+    await stopCamera();
+    State.staffSub = 'list';
+    main_loading();
+    await refreshStaffList();
+    render();
+  }catch(err){
+    console.error('unmerge failed', err);
+    toast('❌ แยกออเดอร์ไม่สำเร็จ: ' + (err.message || err));
+  }
+}
+
+// จากหน้า "ปริ้นใบปะหน้า": รวบออเดอร์ที่ติ๊กเลือกซึ่งเป็นลูกค้าคนเดียวกัน (ชื่อ + เบอร์/ที่อยู่ตรงกัน) ในคิวแพ็ค
+async function mergeApiPickedByBuyer(btn){
+  const picked = State.apiOrdersFiltered.filter(ao => State.apiOrdersPicked.has(String(ao.id || ao.order_id)));
+  if(picked.length < 2){ toast('ติ๊กเลือกอย่างน้อย 2 ออเดอร์ก่อน'); return; }
+  const byBuyer = {};
+  picked.forEach(ao => { const b = mgBuyerFromApi(ao); if(b.strong) (byBuyer[b.key] = byBuyer[b.key] || []).push(String(ao.id || ao.order_id)); });
+  const groups = Object.values(byBuyer).filter(g => g.length >= 2);
+  if(!groups.length){ toast('ไม่พบออเดอร์ที่เลือกซึ่งเป็นลูกค้าคนเดียวกัน (ชื่อ+เบอร์/ที่อยู่ต้องตรงกัน)'); return; }
+  if(!confirm('รวบ ' + groups.length + ' กลุ่มลูกค้าในคิวแพ็ค PackCheck?\n(เป็นการรวมในระบบแพ็คเท่านั้น ไม่ได้รวมพัสดุที่ TikTok)')) return;
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '⏳ กำลังรวบ...';
+  try{
+    await upsertApiOrdersToPackCheck(picked, true);
+    await refreshStaffList();
+    let merged = 0, orders = 0;
+    for(const ids of groups){
+      const docs = [];
+      ids.forEach(id => { const d = State.orders.find(o => mgIds(o).includes(id)); if(d && !docs.includes(d) && mgEligible(d)) docs.push(d); });
+      if(docs.length < 2) continue;
+      await mgDoMerge(docs);
+      await refreshStaffList();
+      merged++; orders += docs.length;
+    }
+    toast(merged ? '🔗 รวบ ' + orders + ' ออเดอร์ เหลือ ' + merged + ' พัสดุในคิวแพ็คแล้ว' : 'ไม่มีออเดอร์ที่รวบได้ (อาจรวบไปแล้ว หรือแพ็คครบแล้ว)');
+  }catch(err){
+    console.error('api merge failed', err);
+    toast('❌ รวบออเดอร์ไม่สำเร็จ: ' + (err.message || err));
+  }
+  btn.disabled = false; btn.textContent = old;
+}
+
+(function wireMergeModal(){
+  const modal = document.getElementById('merge-modal');
+  if(!modal) return;
+  document.getElementById('mg-close').onclick = closeMergeModal;
+  document.getElementById('mg-tab-auto').onclick = () => { State.mg.tab = 'auto'; mgRender(); };
+  document.getElementById('mg-tab-manual').onclick = () => { State.mg.tab = 'manual'; mgRender(); };
+  modal.addEventListener('click', e => { if(e.target === modal) closeMergeModal(); });
+  modal.addEventListener('change', e => {
+    const t = e.target;
+    if(t.dataset && t.dataset.mgChk !== undefined){
+      if(t.checked) State.mg.unchecked.delete(t.dataset.mgChk); else State.mg.unchecked.add(t.dataset.mgChk);
+      mgRender();
+    } else if(t.dataset && t.dataset.mgPick !== undefined){
+      if(t.checked) State.mg.picks.add(t.dataset.mgPick); else State.mg.picks.delete(t.dataset.mgPick);
+      mgRender();
+    }
+  });
+  modal.addEventListener('input', e => {
+    if(e.target.id !== 'mg-search') return;
+    const caret = e.target.selectionStart;
+    State.mg.search = e.target.value;
+    mgRender();
+    const s = document.getElementById('mg-search');
+    if(s){ s.focus(); s.setSelectionRange(caret, caret); }
+  });
+  modal.addEventListener('click', async e => {
+    const gBtn = e.target.closest('[data-mg-group]');
+    if(gBtn){
+      const g = mgFindGroups(State.orders).find(x => x.key === gBtn.dataset.mgGroup);
+      if(!g) return;
+      const ids = g.orders.filter(o => !State.mg.unchecked.has(o.orderId)).map(o => o.orderId);
+      gBtn.disabled = true;
+      await mgMergeIds(ids, !g.strong);
+      return;
+    }
+    if(e.target.closest('#mg-all-btn')){
+      const gs = mgFindGroups(State.orders).filter(g => g.strong);
+      if(!confirm('รวบ ' + gs.length + ' กลุ่มลูกค้าเลยหรือไม่?')) return;
+      let n = 0, last = null;
+      try{
+        for(const g of gs){
+          const docs = g.orders.filter(o => !State.mg.unchecked.has(o.orderId));
+          if(docs.length < 2) continue;
+          last = await mgDoMerge(docs); n++;
+        }
+      }catch(err){ console.error(err); toast('❌ รวบไม่สำเร็จ: ' + (err.message || err)); }
+      await mgAfterMerge(last, '🔗 รวบแล้ว ' + n + ' กลุ่ม');
+      return;
+    }
+    if(e.target.closest('#mg-manual-btn')){
+      await mgMergeIds([...State.mg.picks], false);
+    }
+  });
+})();
+
 /* ============ INIT ============ */
 (async function init(){
   // #app มี backdrop-filter ทำให้ position:fixed ของหน้าต่างป๊อปอัปอิงตาม #app (ซึ่งสูงมากเมื่อมีออเดอร์เยอะ) → หน้าต่างไปอยู่นอกจอ
@@ -5977,8 +6404,12 @@ function renderApiPrintDOM(){
     </div>
   ` : '';
 
+  const apBuyerCount = {};
+  list.forEach(ao => { const b = mgBuyerFromApi(ao); if(b.strong) apBuyerCount[b.key] = (apBuyerCount[b.key] || 0) + 1; });
   const rowsHtml = list.length ? list.map(ao => {
     const oid = String(ao.id || ao.order_id);
+    const apB = mgBuyerFromApi(ao);
+    const apSame = apB.strong ? (apBuyerCount[apB.key] || 0) : 0;
     const checked = State.apiOrdersPicked.has(oid);
     const isWaitShip = ao.status === 'AWAITING_SHIPMENT';
     const dtStr = ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
@@ -6001,6 +6432,7 @@ function renderApiPrintDOM(){
             ${cr ? `<span class="bg-live" style="background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px">LIVE ${esc(cr)}</span>` : ''}
           </div>
           <div class="cust" style="margin-top:3px">👤 ${esc(ao.recipient_address?.name || ao.buyer_email || 'ลูกค้า TikTok')} · 🕒 ${dtStr}</div>
+          ${apSame > 1 ? `<div><span class="mg-chip">👥 ลูกค้าคนเดียวกัน ${apSame} ออเดอร์ — รวบได้</span></div>` : ''}
           ${trk ? `<div class="mono" style="font-size:12px;color:#047857;font-weight:700;margin-top:2px">📦 เลขพัสดุ: ${esc(trk)}</div>` : `<div class="muted" style="font-size:11.5px;margin-top:2px">⏳ เลขพัสดุจะออกอัตโนมัติเมื่อกด "เตรียมการจัดส่ง+พิมพ์"</div>`}
           <div style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(0,0,0,0.08)">${itemsHtml}</div>
         </div>
@@ -6036,6 +6468,9 @@ function renderApiPrintDOM(){
       <div class="row">
         <button class="btn" id="ap-batch-print-btn" style="background:#00997a;flex:2">🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)</button>
         <button class="btn secondary" id="ap-picklist-btn" style="flex:1">📋 ใบสรุปหยิบของ</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn secondary" id="ap-merge-btn" style="color:#5b21b6;border-color:#c4b5fd">🔗 รวบออเดอร์ลูกค้าเดียวกัน (ที่เลือก) เข้าคิวแพ็ค</button>
       </div>
     </div>
 
@@ -6166,6 +6601,9 @@ function wireApiPrintDOM(){
     }
   };
 
+  // 1.5) รวบออเดอร์ลูกค้าเดียวกันในคิวแพ็ค
+  document.getElementById('ap-merge-btn').onclick = () => mergeApiPickedByBuyer(document.getElementById('ap-merge-btn'));
+
   // 2) พิมพ์ใบสรุปหยิบของ (Pick List)
   document.getElementById('ap-picklist-btn').onclick = async () => {
     const selected = State.apiOrdersFiltered.filter(ao => State.apiOrdersPicked.has(String(ao.id || ao.order_id)));
@@ -6220,7 +6658,12 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false){
   const date = State.date || todayStr();
   const existingEntries = await getExistingOrderEntries(date);
   const existingMap = {};
-  existingEntries.forEach(en => { try{ existingMap[JSON.parse(en.value).orderId] = JSON.parse(en.value); }catch(e){} });
+  existingEntries.forEach(en => { try{
+    const d = JSON.parse(en.value);
+    existingMap[d.orderId] = d;
+    // ออเดอร์ที่ถูกรวบแล้ว: ให้ทุก Order ID เดิมชี้ไปที่ออเดอร์รวม จะได้ไม่ถูกสร้างซ้ำตอนซิงค์
+    if(Array.isArray(d.originalOrderIds)) d.originalOrderIds.forEach(id => { if(!existingMap[id]) existingMap[id] = d; });
+  }catch(e){} });
 
   const writeEntries = [];
   let newCount = 0;
@@ -6236,8 +6679,20 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false){
       // ถ้าออเดอร์มีอยู่แล้ว แต่ยังไม่มีเลขพัสดุ (หรือเพิ่งกดรับแล้วได้เลขพัสดุใหม่) ให้อัปเดตเลขพัสดุทันที!
       const prev = existingMap[orderId];
       let changed = false;
-      if(newTracking && prev.tracking !== newTracking){ prev.tracking = newTracking; changed = true; updatedTrkCount++; }
-      if(newPkgId && !prev.packageId){ prev.packageId = newPkgId; changed = true; }
+      if(Array.isArray(prev.originalOrderIds) && prev.originalOrderIds.length > 1 && prev.orderId !== orderId){
+        // ออเดอร์รวม: เก็บเลขพัสดุของแต่ละออเดอร์ไว้แยก เพื่อให้สแกนใบปะหน้าใบไหนก็เจอ
+        if(newTracking){
+          prev.memberTrackings = prev.memberTrackings || {};
+          if(prev.memberTrackings[orderId] !== newTracking){
+            prev.memberTrackings[orderId] = newTracking; changed = true; updatedTrkCount++;
+            if(!prev.tracking) prev.tracking = newTracking;
+          }
+        }
+      } else {
+        if(newTracking && prev.tracking !== newTracking){ prev.tracking = newTracking; changed = true; updatedTrkCount++; }
+        if(newPkgId && !prev.packageId){ prev.packageId = newPkgId; changed = true; }
+        if(!prev.buyerKey){ const bf = mgBuyerFields(ao); if(bf.buyerKey){ Object.assign(prev, bf); changed = true; } }
+      }
       if(changed){
         prev.updatedAt = Date.now();
         writeEntries.push({ key: orderKey(date, orderId), value: JSON.stringify(prev) });
@@ -6278,6 +6733,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false){
       orderDate: ao.create_time ? new Date(ao.create_time * 1000).toLocaleString('th-TH') : '',
       source: creator ? 'LIVE' : 'TikTok Shop API',
       creator,
+      ...mgBuyerFields(ao),
       orderedSkus,
       items,
       status: 'pending',
