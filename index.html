@@ -196,6 +196,31 @@
   }
   .sidebar-brand{display:none;}
 
+  @media (max-width:899px){
+    nav.tabs{
+      bottom:calc(8px + env(safe-area-inset-bottom, 0px));
+      width:calc(100% - 12px);padding:4px;border-radius:20px;
+      align-items:stretch;
+    }
+    nav.tabs button, nav.tabs button.active{
+      flex:1 1 0;min-height:60px;padding:5px 1px;gap:2px;
+      transform:none;touch-action:manipulation;
+      font-size:clamp(10px, 2.8vw, 12px);line-height:1.35;
+      transition:background-color .15s, color .15s;
+    }
+    nav.tabs button{color:#c9c6d4;}
+    nav.tabs button.active{background:#5636bd;}
+    nav.tabs button:active:not(.active){transform:none;background:#393442;}
+    nav.tabs button:focus-visible{outline:2px solid white;outline-offset:-3px;}
+    nav.tabs button .tab-ic, nav.tabs button.active .tab-ic{
+      width:28px;height:28px;border:0;background:transparent;box-shadow:none;
+    }
+    nav.tabs button .tab-ic svg, nav.tabs button.active .tab-ic svg{
+      width:22px;height:22px;transform:none;
+    }
+    nav.tabs button.active .tab-label{margin-top:0;}
+  }
+
   main{flex:1;padding:12px 18px 115px;background:#ffffff;}
 
   /* ---- Toolbar Controls Grid (Fixes Overlapping Date & Export Buttons in Image 2!) ---- */
@@ -575,7 +600,7 @@
   main, .card, .row{min-width:0;}
   .card{max-width:100%;overflow-wrap:anywhere;}
   .row.sticky-actions{
-    position:sticky;bottom:88px;z-index:15;
+    position:sticky;bottom:calc(88px + env(safe-area-inset-bottom, 0px));z-index:15;
     background:#ffffff;border:1.5px solid var(--border);border-radius:22px;padding:10px;margin-top:4px;
     box-shadow:0 10px 28px rgba(23,21,28,0.12);
   }
