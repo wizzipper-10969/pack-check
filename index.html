@@ -5444,28 +5444,25 @@ document.getElementById('tab-dash').onclick = () => setTab('dash');
 // --- 1. ซิงค์ออเดอร์จาก TikTok Shop API ---
 async function syncOrdersFromTikTokApi(){
   toast('⏳ กำลังซิงค์ออเดอร์ใหม่จาก TikTok Shop API...');
-  try {
+  try{
     const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders`);
     const json = await res.json();
     
-    if (json.code !== 0 && json.error) {
-      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error));
+    console.log('TikTok Worker Response:', json);
+    if(json.code !== undefined && json.code !== 0){
+      toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + (json.message || json.error || 'กรุณาตรวจสอบการเชื่อมต่อร้านค้า'));
       return;
     }
     
-    const apiOrders = json.data?.orders || json.data?.order_list || json.orders || json.data || [];
-    if (!Array.isArray(apiOrders) || apiOrders.length === 0){
-      toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
+    const apiOrders = json.data?.orders || json.data?.order_list || json.orders || (Array.isArray(json.data) ? json.data : []);
+    if(!Array.isArray(apiOrders) || apiOrders.length === 0){
+      if(json.code !== 0 && json.message){
+        toast('❌ ดึงข้อมูลไม่สำเร็จ: ' + json.message);
+      } else {
+        toast('✅ ไม่มีออเดอร์ใหม่ที่รอจัดส่งในขณะนี้');
+      }
       return;
     }
-
-    toast(`✅ ซิงค์สำเร็จ! พบออเดอร์รอจัดส่ง ${apiOrders.length} รายการ`);
-    // โค้ดประมวลผลออเดอร์ต่อ...
-    
-  } catch (err) {
-    toast('❌ เชื่อมต่อ Worker ไม่สำเร็จ: ' + err.message);
-  }
-}
 
     const setDefs = await loadAllSetDefs();
     const date = State.date || todayStr();
