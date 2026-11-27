@@ -2017,7 +2017,10 @@ async function render(){
 /* ============ STAFF: LIST ============ */
 async function refreshStaffList(){
   await loadDateIndex();
-  if(!State.dates.includes(State.date)){
+  if(!State.date){
+    State.date = todayStr();
+  }
+  if(!State.dates.includes(State.date) && State.date !== todayStr()){
     if(State.dates.length){ State.date = State.dates[0]; }
   }
   if(State.date){
@@ -2059,9 +2062,8 @@ async function refreshStaffList(){
 }
 
 function renderStaffList(){
-  const dateOptions = State.dates.length
-    ? State.dates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('')
-    : `<option>ยังไม่มีข้อมูล</option>`;
+  const allStaffDates = [...new Set([todayStr(), ...State.dates])].sort().reverse();
+  const dateOptions = allStaffDates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('');
 
   const total = State.orders.length;
   const cancelled = State.orders.filter(o => orderStatus(o)==='cancelled').length;
@@ -3058,7 +3060,10 @@ async function handleOrderLookupScan(raw){
 /* ============ VERIFY BEFORE SHIPPING (final QC pass after packing) ============ */
 async function refreshVerifyList(){
   await loadDateIndex();
-  if(!State.dates.includes(State.date)){
+  if(!State.date){
+    State.date = todayStr();
+  }
+  if(!State.dates.includes(State.date) && State.date !== todayStr()){
     if(State.dates.length){ State.date = State.dates[0]; }
   }
   State.verifyOrders = State.date ? await loadOrdersForDate(State.date) : [];
@@ -3066,9 +3071,8 @@ async function refreshVerifyList(){
 }
 
 function renderVerifyList(){
-  const dateOptions = State.dates.length
-    ? State.dates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('')
-    : `<option>ยังไม่มีข้อมูล</option>`;
+  const allVerifyDates = [...new Set([todayStr(), ...State.dates])].sort().reverse();
+  const dateOptions = allVerifyDates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('');
 
   const packedOrders = State.verifyOrders.filter(o => orderStatus(o)==='done');
   const verifiedCount = packedOrders.filter(o => verifyStatusOf(o)==='verified').length;
@@ -3122,7 +3126,10 @@ function renderVerifyList(){
     </div>
     <div class="toolbar-panel">
       <div class="toolbar-date-row" style="width:100%">
-        <label>วันที่รับออเดอร์</label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <label style="margin-bottom:0">รอบวันที่แพ็คสินค้า (แยกแต่ละวันไม่ปนกัน)</label>
+          ${State.date !== todayStr() ? `<button type="button" id="verify-today-btn" style="background:var(--accent-soft);color:var(--accent);border:none;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;cursor:pointer">กลับไปดูวันนี้ (${fmtDateTH(todayStr())})</button>` : `<span style="font-size:11.5px;font-weight:700;color:var(--success)">● แสดงเฉพาะงานวันนี้</span>`}
+        </div>
         <select id="verify-date-select">${dateOptions}</select>
       </div>
     </div>
@@ -3161,6 +3168,16 @@ function wireVerifyList(){
         verifyCamToggle.disabled = false;
         verifyCamToggle.textContent = ok ? '⏹ ปิดกล้อง' : '📷 เปิดกล้องสแกนใบปะหน้า';
       }
+    };
+  }
+  const vTodayBtn = document.getElementById('verify-today-btn');
+  if(vTodayBtn){
+    vTodayBtn.onclick = async () => {
+      State.date = todayStr();
+      main_loading();
+      await refreshVerifyList();
+      document.getElementById('main').innerHTML = renderVerifyList();
+      wireVerifyList();
     };
   }
   const dsel = document.getElementById('verify-date-select');
@@ -5841,7 +5858,7 @@ setTab = function(tab){
     State.view = 'api-print';
     document.getElementById('tab-api-print')?.classList.add('active');
     stopCamera();
-    renderApiPrintView(true);
+    renderApiPrintView(false);
     return;
   }
   _prevSetTab(tab);
@@ -5926,7 +5943,7 @@ function applyApiPrintFilters(shouldRender = true){
 
 async function renderApiPrintView(forceFetch = false){
   if(forceFetch || State.apiOrdersAll.length === 0){
-    await fetchApiOrdersForPrintView(true);
+    await fetchApiOrdersForPrintView(false);
   } else {
     applyApiPrintFilters(true);
   }
@@ -6018,7 +6035,7 @@ function renderApiPrintDOM(){
   main.innerHTML = `
     <div class="hero-banner" style="background:linear-gradient(135deg, #00997a 0%, #007a60 100%)">
       <div class="hero-title">🖨️ ปริ้นใบปะหน้า &amp; จัดการออเดอร์ TikTok</div>
-      <div class="hero-sub">ใบปะหน้าพร้อมรายการสินค้าด้านล่าง (100×150mm) รวมเป็นไฟล์ PDF เดียว + อัปเดตเลขพัสดุเข้าคิวแพ็คทันที</div>
+      <div class="hero-sub">ขั้นตอนที่ 1: รับออเดอร์ + ปริ้นใบปะหน้า (100×150mm) เมื่อปริ้นเสร็จระบบจะส่งไปหน้า "สแกนแพ็ค" ของวันนี้ให้อัตโนมัติ</div>
       <div class="hero-cta-row">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="hero-cta-btn" id="ap-refresh-top" style="background:#17151c">🔄 รีเฟรชออเดอร์ล่าสุด</button>
@@ -6042,12 +6059,7 @@ function renderApiPrintDOM(){
         <div style="font-weight:800;font-size:13.5px;color:var(--accent)">เลือกไว้ ${State.apiOrdersPicked.size} ออเดอร์</div>
       </div>
 
-      <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);margin-bottom:0">
-          <input type="checkbox" id="ap-auto-done-check" checked style="width:16px;height:16px;accent-color:var(--accent)">
-          กดพิมพ์แล้วตัดยอดเปลี่ยนสถานะเป็น "ครบแล้ว" (แพ็คแล้ว) ใน PackCheck ทันที
-        </label>
-      </div>
+
       <div class="row" style="margin-top:8px">
         <button class="btn" id="ap-batch-print-btn" style="background:#00997a;flex:2">🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)</button>
         <button class="btn secondary" id="ap-picklist-btn" style="flex:1">📋 ใบสรุปหยิบของ</button>
@@ -6061,7 +6073,7 @@ function renderApiPrintDOM(){
 }
 
 function wireApiPrintDOM(){
-  document.getElementById('ap-refresh-top').onclick = () => fetchApiOrdersForPrintView(true);
+  document.getElementById('ap-refresh-top').onclick = () => fetchApiOrdersForPrintView(false);
   document.getElementById('ap-toggle-filter').onclick = () => {
     State.apiFilterOpen = !State.apiFilterOpen;
     renderApiPrintDOM();
@@ -6082,7 +6094,7 @@ function wireApiPrintDOM(){
       State.apiFilterState = { status: 'ALL_UNSHIPPED', channel: '', start: '', end: '', creator: '', sku: '', minQty: 1 };
       applyApiPrintFilters(true);
     };
-    document.getElementById('ap-refetch-btn').onclick = () => fetchApiOrdersForPrintView(true);
+    document.getElementById('ap-refetch-btn').onclick = () => fetchApiOrdersForPrintView(false);
   }
 
   document.getElementById('ap-sel-all').onclick = () => {
@@ -6118,84 +6130,11 @@ function wireApiPrintDOM(){
     };
   });
 
-  // 1) เตรียมการจัดส่ง + รวมไฟล์ PDF เดียว + อัปเดต Tracking Number เข้าคิวแพ็คทันที
-  document.getElementById('ap-batch-print-btn').onclick = async () => {
+  // 1) กดปุ่มเตรียมการจัดส่ง + พิมพ์ใบปะหน้า -> เช็คออเดอร์ที่อยู่เดียวกันก่อน เด้งป๊อปอัปรวมคำสั่งซื้อเหมือน TikTok Shop
+  document.getElementById('ap-batch-print-btn').onclick = () => {
     const selected = State.apiOrdersFiltered.filter(ao => State.apiOrdersPicked.has(String(ao.id || ao.order_id)));
     if(!selected.length){ toast('กรุณาติ๊กเลือกออเดอร์ที่ต้องการพิมพ์อย่างน้อย 1 รายการ'); return; }
-
-    const btn = document.getElementById('ap-batch-print-btn');
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⏳ กำลังกดจัดส่งและดึงใบปะหน้าจาก TikTok...';
-
-    try{
-      const packages = selected.map(ao => ({
-        order_id: String(ao.id || ao.order_id),
-        package_id: ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '',
-        need_ship: ao.status === 'AWAITING_SHIPMENT'
-      })).filter(p => p.package_id);
-
-      if(!packages.length){
-        toast('⚠️ ไม่พบ Package ID ในออเดอร์ที่เลือก');
-        btn.disabled = false; btn.textContent = origText;
-        return;
-      }
-
-      const res = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packages })
-      });
-      const json = await res.json();
-      const results = json.results || [];
-      const docUrls = results.map(r => r.doc_url).filter(Boolean);
-
-      // อัปเดตสถานะและ Tracking Number กลับเข้า State และคิวแพ็ค PackCheck ทันที
-      const autoDone = document.getElementById('ap-auto-done-check')?.checked;
-      const trkByOrder = {};
-      results.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
-      selected.forEach(ao => {
-        const oid = String(ao.id || ao.order_id);
-        ao.status = 'AWAITING_COLLECTION';
-        if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
-      });
-      await upsertApiOrdersToPackCheck(selected, false, autoDone);
-
-      if(!docUrls.length){
-        toast('❌ TikTok ยังไม่ออกไฟล์ใบปะหน้าให้ (กรุณากดลองใหม่อีกครั้งใน 3 วินาที)');
-        btn.disabled = false; btn.textContent = origText;
-        renderApiPrintDOM();
-        return;
-      }
-
-      btn.textContent = `📄 กำลังรวมไฟล์ PDF ทั้งหมด (${docUrls.length} ใบ)...`;
-
-      // ใช้ PDFLib รวมไฟล์ PDF ทุกออเดอร์ให้เป็นไฟล์ PDF เดียวกัน!
-      if(typeof PDFLib !== 'undefined'){
-        const mergedPdf = await PDFLib.PDFDocument.create();
-        for(const u of docUrls){
-          try{
-            const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
-            const pdfBytes = await pdfResp.arrayBuffer();
-            const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
-            const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
-            copiedPages.forEach(p => mergedPdf.addPage(p));
-          }catch(e){ console.error('Failed to merge one PDF page', e); }
-        }
-        const mergedBytes = await mergedPdf.save();
-        const blob = new Blob([mergedBytes], { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
-        toast(`✅ รวมใบปะหน้า ${docUrls.length} ออเดอร์เป็นไฟล์เดียวเรียบร้อย!`);
-      } else {
-        window.open(docUrls[0], '_blank');
-      }
-
-      renderApiPrintDOM();
-    }catch(err){
-      toast('❌ เกิดข้อผิดพลาด: ' + err.message);
-      btn.disabled = false; btn.textContent = origText;
-    }
+    openCombineOrdersModal(selected);
   };
 
   // 2) พิมพ์ใบสรุปหยิบของ (Pick List)
@@ -6278,10 +6217,10 @@ function buildSameAddressGroups(ordersList){
 }
 
 // ฟังก์ชันซิงค์และอัปเดตเลขพัสดุเข้าคิวแพ็คของ PackCheck อัตโนมัติ (รองรับรวมพัสดุที่อยู่เดียวกัน/เลขพัสดุเดียวกัน)
-async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDone = false){
+async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDone = false, targetDate = null, respectForceGroupKey = false){
   if(!apiOrdersList || !apiOrdersList.length) return;
   const setDefs = await loadAllSetDefs();
-  const date = State.date || todayStr();
+  const date = targetDate || todayStr();
   const existingEntries = await getExistingOrderEntries(date);
 
   // สร้างดัชนีจากข้อมูลเดิมในวันนั้น (รองรับทั้งออเดอร์เดี่ยวและออเดอร์ที่เคยรวมกลุ่มไว้แล้ว)
@@ -6296,8 +6235,17 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
     }catch(e){}
   });
 
-  // จัดกลุ่มออเดอร์ตามเลขพัสดุ (Tracking) หรือที่อยู่เดียวกัน (Same Address)
-  const { byKey } = buildSameAddressGroups(apiOrdersList);
+  // จัดกลุ่มออเดอร์ตามการยืนยันรวมพัสดุ (หรือตามเลขพัสดุ/ที่อยู่เดียวกัน)
+  let byKey = {};
+  if(respectForceGroupKey){
+    apiOrdersList.forEach(ao => {
+      const k = ao._forceGroupKey || ('SINGLE:' + String(ao.id || ao.order_id));
+      if(!byKey[k]) byKey[k] = [];
+      byKey[k].push(ao);
+    });
+  } else {
+    byKey = buildSameAddressGroups(apiOrdersList).byKey;
+  }
   const writeEntries = [];
   const keysToDelete = new Set();
   let newCount = 0;
@@ -6447,6 +6395,271 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
     }
   }
 }
+</script>
+
+<div id="combine-orders-modal" class="modal-overlay">
+  <div class="modal-card wide" style="max-width:680px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div class="modal-title" style="margin-bottom:0">📦 รวมคำสั่งซื้อ (พบที่อยู่จัดส่งเดียวกัน)</div>
+      <button type="button" id="co-close-x" style="background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;padding:4px 8px">✕</button>
+    </div>
+    <div class="modal-desc">เพื่อประหยัดค่าจัดส่ง ระบบตรวจพบคำสั่งซื้อที่อยู่จัดส่งเดียวกันในรอบที่คุณเลือก — สามารถลบรายการที่ไม่ต้องการรวมออกจากพัสดุ หรือกดยืนยันการรวมก่อนไปหน้าพิมพ์ใบปะหน้าได้ทันที</div>
+    <div id="co-groups-list" style="max-height:52vh;overflow-y:auto;padding-right:4px;margin-bottom:14px"></div>
+    <div class="row" style="gap:10px">
+      <button type="button" class="btn secondary" id="co-skip-combine-btn" style="flex:1">ดำเนินการต่อโดยไม่รวมพัสดุ</button>
+      <button type="button" class="btn" id="co-confirm-combine-btn" style="background:#00997a;flex:1.5">ยืนยันการรวมคำสั่งซื้อทั้งหมดและดำเนินการต่อ ›</button>
+    </div>
+  </div>
+</div>
+
+<script>
+
+// --- 8. หน้าต่างป๊อปอัป "รวมคำสั่งซื้อ" ก่อนพิมพ์ใบปะหน้า (เหมือน TikTok Seller Center) ---
+State.combineDraftGroups = []; // [{ groupKey, customer, address, orders: [...] }]
+State.pendingPrintSelected = [];
+
+function openCombineOrdersModal(selectedOrders){
+  const { byKey } = buildSameAddressGroups(selectedOrders);
+  const mergeable = [];
+  Object.entries(byKey).forEach(([gKey, grp]) => {
+    if(grp.length >= 2){
+      const first = grp[0];
+      const addr = first.recipient_address || {};
+      mergeable.push({
+        groupKey: gKey,
+        customer: addr.name || first.buyer_email || 'ลูกค้า TikTok',
+        address: addr.full_address || '',
+        orders: [...grp]
+      });
+    }
+  });
+
+  if(mergeable.length === 0){
+    // ไม่มีออเดอร์ที่อยู่เดียวกัน -> ข้ามป๊อปอัปไปปริ้นใบปะหน้าทันที
+    executeBatchShipAndPrint(selectedOrders, false);
+    return;
+  }
+
+  State.pendingPrintSelected = selectedOrders;
+  State.combineDraftGroups = mergeable;
+  renderCombineGroupsDOM();
+  document.getElementById('combine-orders-modal').classList.add('show');
+}
+
+function renderCombineGroupsDOM(){
+  const container = document.getElementById('co-groups-list');
+  const groups = State.combineDraftGroups.filter(g => g.orders.length >= 2);
+  const totalOrdersInGroups = groups.reduce((s, g) => s + g.orders.length, 0);
+
+  if(groups.length === 0){
+    container.innerHTML = '<div class="empty" style="padding:24px">ไม่มีกลุ่มพัสดุที่เหลือให้รวมแล้ว — กด "ดำเนินการต่อโดยไม่รวมพัสดุ" เพื่อพิมพ์ใบปะหน้าได้เลย</div>';
+    document.getElementById('co-confirm-combine-btn').disabled = true;
+    document.getElementById('co-confirm-combine-btn').textContent = 'ยืนยันการรวมคำสั่งซื้อ (0 รายการ)';
+    return;
+  }
+
+  document.getElementById('co-confirm-combine-btn').disabled = false;
+  document.getElementById('co-confirm-combine-btn').textContent = `ยืนยันการรวมคำสั่งซื้อทั้งหมด ${totalOrdersInGroups} รายการและดำเนินการต่อ ›`;
+
+  container.innerHTML = groups.map((grp, gIdx) => {
+    const orderRows = grp.orders.map((ao, oIdx) => {
+      const oid = String(ao.id || ao.order_id);
+      const lineItems = ao.line_items || ao.item_list || [];
+      const itemSummary = lineItems.map(li => `${esc(li.product_name || li.seller_sku)} ×${li.quantity || 1}`).join(', ');
+      const totalAmt = ao.payment?.total_amount ? `฿${ao.payment.total_amount}` : '';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:#ffffff;border:1px solid var(--border);border-radius:14px;margin-top:8px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span class="mono" style="font-weight:800;font-size:13.5px;color:var(--text)">${esc(oid)}</span>
+              <span class="pill progress">${lineItems.length} รายการ</span>
+              ${totalAmt ? `<span style="font-size:12px;font-weight:700;color:var(--orange)">ยอดรวม: ${esc(totalAmt)}</span>` : ''}
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${itemSummary}</div>
+          </div>
+          <button type="button" data-co-remove="${gIdx}|${oIdx}" style="background:none;border:none;color:var(--accent);font-weight:700;font-size:13px;cursor:pointer;padding:6px 10px;flex-shrink:0">ลบ</button>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="card" style="background:#f8f6fe;border:1.5px solid #dcd3f7;padding:14px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <div style="font-weight:800;font-size:14.5px;color:var(--accent)">พัสดุที่ ${gIdx + 1} · คุณ ${esc(grp.customer)} <span style="font-size:12px;font-weight:600;color:var(--muted)">(${grp.orders.length} ออเดอร์)</span></div>
+            ${grp.address ? `<div class="muted" style="font-size:12px;margin-top:2px">📍 ${esc(grp.address)}</div>` : ''}
+          </div>
+          <span class="pill done">พร้อมรวมกล่องเดียว</span>
+        </div>
+        ${orderRows}
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-co-remove]').forEach(btn => {
+    btn.onclick = () => {
+      const [gIdx, oIdx] = btn.dataset.coRemove.split('|').map(Number);
+      if(State.combineDraftGroups[gIdx]){
+        State.combineDraftGroups[gIdx].orders.splice(oIdx, 1);
+        renderCombineGroupsDOM();
+      }
+    };
+  });
+}
+
+document.getElementById('co-close-x').onclick = () => document.getElementById('combine-orders-modal').classList.remove('show');
+document.getElementById('co-skip-combine-btn').onclick = () => {
+  document.getElementById('combine-orders-modal').classList.remove('show');
+  executeBatchShipAndPrint(State.pendingPrintSelected, false);
+};
+document.getElementById('co-confirm-combine-btn').onclick = () => {
+  document.getElementById('combine-orders-modal').classList.remove('show');
+  // สร้างชุด Group Keys ที่ผู้ใช้กดยืนยันให้รวม
+  const confirmedGroupMap = {};
+  State.combineDraftGroups.forEach(g => {
+    if(g.orders.length >= 2){
+      g.orders.forEach(ao => {
+        confirmedGroupMap[String(ao.id || ao.order_id)] = g.groupKey;
+      });
+    }
+  });
+  executeBatchShipAndPrint(State.pendingPrintSelected, true, confirmedGroupMap);
+};
+
+async function executeBatchShipAndPrint(selected, shouldCombine = false, confirmedGroupMap = {}){
+  if(!selected || !selected.length) return;
+  const btn = document.getElementById('ap-batch-print-btn');
+  const origText = btn ? btn.textContent : '🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)';
+  if(btn) btn.disabled = true;
+
+  try{
+    // จัดกลุ่มตาม Package ID เพื่อไม่ยิงซ้ำในพัสดุที่รวมกันแล้ว
+    const seenPkg = new Set();
+    const packages = [];
+    selected.forEach(ao => {
+      const pkgId = ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '';
+      if(pkgId && !seenPkg.has(pkgId)){
+        seenPkg.add(pkgId);
+        packages.push({
+          order_id: String(ao.id || ao.order_id),
+          package_id: pkgId,
+          need_ship: ao.status === 'AWAITING_SHIPMENT'
+        });
+      }
+    });
+
+    if(!packages.length){
+      toast('⚠️ ไม่พบ Package ID ในออเดอร์ที่เลือก');
+      if(btn){ btn.disabled = false; btn.textContent = origText; }
+      return;
+    }
+
+    const CHUNK_SIZE = 10;
+    const allResults = [];
+    for(let i = 0; i < packages.length; i += CHUNK_SIZE){
+      const chunk = packages.slice(i, i + CHUNK_SIZE);
+      if(btn) btn.textContent = `⏳ กำลังรับออเดอร์และดึงใบปะหน้า (${Math.min(i + CHUNK_SIZE, packages.length)}/${packages.length})...`;
+      const res = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages: chunk })
+      });
+      const json = await res.json();
+      if(json.code !== undefined && json.code !== 0 && !json.results){
+        throw new Error(json.message || json.error || 'Worker Error');
+      }
+      if(Array.isArray(json.results)) allResults.push(...json.results);
+    }
+
+    // รอ 2 วินาทีแล้วดึงซ้ำให้อัตโนมัติหาก TikTok เพิ่งกดจัดส่งและ PDF ยังสร้างไม่เสร็จ
+    const missingPkgs = allResults.filter(r => !r.doc_url && r.package_id).map(r => ({
+      order_id: r.order_id,
+      package_id: r.package_id,
+      need_ship: false
+    }));
+    if(missingPkgs.length > 0){
+      if(btn) btn.textContent = `⏳ รอ TikTok สร้างไฟล์ใบปะหน้าอีก ${missingPkgs.length} ใบ...`;
+      await sleep(2000);
+      for(let i = 0; i < missingPkgs.length; i += CHUNK_SIZE){
+        const chunk = missingPkgs.slice(i, i + CHUNK_SIZE);
+        const res2 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: chunk })
+        });
+        const json2 = await res2.json();
+        if(Array.isArray(json2.results)){
+          json2.results.forEach(r2 => {
+            const idx = allResults.findIndex(x => x.package_id === r2.package_id);
+            if(idx >= 0 && r2.doc_url) allResults[idx] = r2;
+          });
+        }
+      }
+    }
+
+    const docUrls = [...new Set(allResults.map(r => r.doc_url).filter(Boolean))];
+    const firstErr = allResults.find(r => !r.doc_url && r.message)?.message || '';
+
+    // อัปเดตสถานะและ Tracking Number กลับเข้า State และส่งไปหน้า "สแกนแพ็ค" ของวันนี้
+    const trkByOrder = {};
+    allResults.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
+    selected.forEach(ao => {
+      const oid = String(ao.id || ao.order_id);
+      ao.status = 'AWAITING_COLLECTION';
+      if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
+      // ระบุกลุ่มรวมพัสดุตามที่ผู้ใช้กดยืนยันในป๊อปอัป (หรือแยกเดี่ยวถ้ากดไม่รวม)
+      ao._forceGroupKey = (shouldCombine && confirmedGroupMap[oid]) ? confirmedGroupMap[oid] : ('SINGLE:' + oid);
+    });
+
+    const packDate = todayStr();
+    State.date = packDate;
+    await upsertApiOrdersToPackCheck(selected, false, false, packDate, true);
+
+    if(!docUrls.length){
+      toast('❌ พิมพ์ไม่สำเร็จ: ' + (firstErr || 'TikTok ยังไม่ออกไฟล์ใบปะหน้าให้ (ลองกดใหม่อีกครั้ง)'));
+      if(btn){ btn.disabled = false; btn.textContent = origText; }
+      renderApiPrintDOM();
+      return;
+    }
+
+    if(btn) btn.textContent = `📄 กำลังรวมไฟล์ PDF ทั้งหมด (${docUrls.length} ใบ)...`;
+
+    // รวมไฟล์ PDF ทุกออเดอร์ให้เป็นไฟล์ PDF เดียวกัน!
+    let mergedCount = 0;
+    if(typeof PDFLib !== 'undefined'){
+      const mergedPdf = await PDFLib.PDFDocument.create();
+      for(const u of docUrls){
+        try{
+          const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
+          if(!pdfResp.ok) continue;
+          const pdfBytes = await pdfResp.arrayBuffer();
+          const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
+          const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+          copiedPages.forEach(p => mergedPdf.addPage(p));
+          mergedCount++;
+        }catch(e){ console.error('Failed to merge one PDF page', e); }
+      }
+      if(mergedCount > 0){
+        const mergedBytes = await mergedPdf.save();
+        const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      } else {
+        window.open(docUrls[0], '_blank');
+      }
+    } else {
+      window.open(docUrls[0], '_blank');
+    }
+
+    toast(`✅ พิมพ์ใบปะหน้าสำเร็จ และส่ง ${selected.length} ออเดอร์ไปหน้า "สแกนแพ็ค" (${fmtDateTH(packDate)}) แล้ว!`);
+    if(btn){ btn.disabled = false; btn.textContent = origText; }
+    renderApiPrintDOM();
+  }catch(err){
+    toast('❌ เกิดข้อผิดพลาด: ' + err.message);
+    if(btn){ btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
 </script>
 </body>
 </html>
