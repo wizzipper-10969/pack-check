@@ -6338,6 +6338,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
       if(k !== orderKey(date, finalOrderId)) keysToDelete.add(k);
     });
 
+    prevDoc = combineApiPreviousDocuments([...matchedPrevKeys].map(k => existingDocsByKey[k]), origIds);
     const mergedItems = [];
     const mergedOrderedSkus = [];
     let bestTracking = '';
@@ -6396,6 +6397,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
         if(pItem && pItem.qtyScanned){
           it.qtyScanned = Math.min(pItem.qtyScanned, it.qtyRequired);
         }
+        if(pItem) it.qtyVerified = Math.min(Number(pItem.qtyVerified) || 0, it.qtyRequired);
         if(autoDone) it.qtyScanned = it.qtyRequired;
       });
 
@@ -6417,7 +6419,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
       };
       if(printSubmission) updatedObj.printSubmission = printSubmission;
       if(isMerged) updatedObj.originalOrderIds = origIds;
-      writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(updatedObj) });
+      writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(preserveApiScanProgress(updatedObj, prevDoc, autoDone)), sourceKeys: [...matchedPrevKeys], autoDone });
     } else {
       if(autoDone){
         mergedItems.forEach(it => { it.qtyScanned = it.qtyRequired; });
@@ -6438,16 +6440,13 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
       };
       if(printSubmission) orderObj.printSubmission = printSubmission;
       if(isMerged) orderObj.originalOrderIds = origIds;
-      writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(orderObj) });
+      writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(orderObj), sourceKeys: [...matchedPrevKeys], autoDone });
       newCount++;
     }
   }
 
-  if(keysToDelete.size > 0){
-    await sBatchDelete([...keysToDelete]);
-  }
   if(writeEntries.length > 0){
-    await sBatchSet(writeEntries);
+    await saveApiOrderChanges(writeEntries);
     await addDateToIndex(date);
     if(!silent){
       const parts = [];
@@ -6588,6 +6587,99 @@ document.getElementById('co-confirm-combine-btn').onclick = () => {
   });
   executeBatchShipAndPrint(State.pendingPrintSelected, true, confirmedGroupMap);
 };
+
+function apiOrderOriginalIds(order){
+  return (order.originalOrderIds?.length ? order.originalOrderIds : [order.orderId]).filter(Boolean).map(String).sort();
+}
+
+function combineApiPreviousDocuments(documents, nextIds){
+  const docs = documents.filter(Boolean);
+  if(!docs.length) return null;
+  const wanted = new Set(nextIds.map(String));
+  for(const doc of docs){
+    if(apiOrderOriginalIds(doc).some(id => !wanted.has(id))){
+      throw new Error('ออเดอร์นี้เคยรวมพัสดุไว้แล้ว จึงไม่แยกหรือเขียนทับผลสแกนอัตโนมัติ กรุณาตรวจกลุ่มออเดอร์เดิม');
+    }
+  }
+  if(docs.length === 1) return JSON.parse(JSON.stringify(docs[0]));
+  // An existing combined row already covers its children: do not double count it.
+  const ordered = [...docs].sort((a,b) => apiOrderOriginalIds(b).length - apiOrderOriginalIds(a).length);
+  const seen = new Set();
+  const distinct = [];
+  for(const doc of ordered){
+    const ids = apiOrderOriginalIds(doc);
+    if(ids.every(id => seen.has(id))) continue;
+    if(ids.some(id => seen.has(id))) throw new Error('ประวัติกลุ่มออเดอร์ซ้อนกัน จึงหยุดซิงค์เพื่อรักษาผลสแกนเดิม');
+    ids.forEach(id => seen.add(id));
+    distinct.push(doc);
+  }
+  if(distinct.length === 1) return JSON.parse(JSON.stringify(distinct[0]));
+  const combined = { ...distinct[0], items: [], originalOrderIds: [...seen].sort(),
+    activityLog: distinct.flatMap(d => d.activityLog || []),
+    itemsManuallyEdited: distinct.some(d => d.itemsManuallyEdited) };
+  for(const doc of distinct){
+    for(const item of doc.items || []){
+      let existing = combined.items.find(i => i.code === item.code);
+      if(!existing){ existing = { ...item, qtyRequired:0, qtyScanned:0, qtyVerified:0 }; combined.items.push(existing); }
+      existing.qtyRequired += Number(item.qtyRequired) || 0;
+      existing.qtyScanned += Number(item.qtyScanned) || 0;
+      existing.qtyVerified += Number(item.qtyVerified) || 0;
+      if(item.gift) existing.gift = true;
+    }
+  }
+  const fullyVerified = distinct.every(d => d.items?.length && d.items.every(i => (i.qtyVerified || 0) >= i.qtyRequired));
+  if(fullyVerified){
+    const latest = [...distinct].sort((a,b) => (b.verifiedAt || 0) - (a.verifiedAt || 0))[0];
+    combined.verifiedAt = latest.verifiedAt || null;
+    combined.verifiedBy = [...new Set(distinct.map(d => d.verifiedBy).filter(Boolean))].join(', ') || null;
+  }else { combined.verifiedAt = null; combined.verifiedBy = null; }
+  return combined;
+}
+
+function preserveApiScanProgress(incoming, previous, autoDone = false){
+  if(!previous) return incoming;
+  const next = { ...previous, ...incoming };
+  const sameIds = JSON.stringify(apiOrderOriginalIds(previous)) === JSON.stringify(apiOrderOriginalIds(incoming));
+  if(previous.itemsManuallyEdited && !sameIds){
+    throw new Error('ออเดอร์ที่แก้สินค้าเองกำลังเปลี่ยนกลุ่ม จึงหยุดเพื่อรักษารายการสินค้าและผลสแกนเดิม');
+  }
+  const items = previous.itemsManuallyEdited ? previous.items : incoming.items;
+  next.items = items.map(item => {
+    const old = previous.items?.find(i => i.code === item.code);
+    return { ...item,
+      qtyScanned: autoDone ? item.qtyRequired : Math.min(Math.max(0, Number(old ? old.qtyScanned : item.qtyScanned)||0), item.qtyRequired),
+      qtyVerified: Math.min(Math.max(0, Number(old ? old.qtyVerified : item.qtyVerified)||0), item.qtyRequired) };
+  });
+  for(const gift of previous.items || []){
+    if(gift.gift && !next.items.some(i => i.code === gift.code)) next.items.push({ ...gift });
+  }
+  if(previous.itemsManuallyEdited) next.itemsManuallyEdited = true;
+  next.activityLog = previous.activityLog || incoming.activityLog;
+  const verified = next.items.length && next.items.every(i => i.qtyScanned >= i.qtyRequired && i.qtyVerified >= i.qtyRequired);
+  // A changed item list that needs further QC must not retain a stale completion stamp.
+  next.verifiedAt = verified ? (previous.verifiedAt || incoming.verifiedAt || null) : null;
+  next.verifiedBy = verified ? (previous.verifiedBy || incoming.verifiedBy || null) : null;
+  return next;
+}
+
+async function saveApiOrderChanges(entries){
+  for(const entry of entries){
+    // Read current rows in the transaction, rather than overwriting a scan made
+    // while the API/PDF was loading. Reapply on retry and delete sources atomically.
+    const keys = [...new Set([entry.key, ...(entry.sourceKeys || [])])];
+    await db.runTransaction(async transaction => {
+      const refs = keys.map(key => db.collection('packcheck').doc(sanitizeDocId(key)));
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      const documents = snapshots.filter(s => s.exists).map(s => JSON.parse(s.data().value));
+      const incoming = JSON.parse(entry.value);
+      const previous = combineApiPreviousDocuments(documents, apiOrderOriginalIds(incoming));
+      const next = preserveApiScanProgress(incoming, previous, entry.autoDone);
+      next.updatedAt = Date.now();
+      transaction.set(refs[0], { value: JSON.stringify(next), updatedAt: next.updatedAt });
+      keys.forEach((key,index) => { if(key !== entry.key) transaction.delete(refs[index]); });
+    });
+  }
+}
 
 // Direct printing: a receipt confirms submission to Windows, not physical paper output.
 const PACKCHECK_PRINT = Object.freeze({
