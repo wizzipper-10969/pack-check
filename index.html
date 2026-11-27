@@ -5910,6 +5910,7 @@ async function fetchApiOrdersForPrintView(autoSyncToQueue = false){
       existingToday.forEach(en => {
         try{
           const doc = JSON.parse(en.value);
+          if(doc.printSubmission?.status !== 'submitted') return;
           const origs = (Array.isArray(doc.originalOrderIds) && doc.originalOrderIds.length) ? doc.originalOrderIds : [doc.orderId];
           origs.forEach(id => State.apiPrintedIds.add(String(id)));
         }catch(e){}
@@ -6066,12 +6067,12 @@ function renderApiPrintDOM(){
         </div>
       </label>
     `;
-  }).join('') : `<div class="empty"><div class="big">${State.apiPrintTab==='new'?'🎉':'📭'}</div>${State.apiPrintTab==='new'?'ไม่มีออเดอร์ใหม่ค้างพิมพ์แล้ว!':'ยังไม่มีรายการออเดอร์ในแถบพิมพ์แล้ว'}<br><span class="muted" style="font-size:13px">${State.apiPrintTab==='new'?'ออเดอร์ที่พิมพ์ไปแล้วจะย้ายไปอยู่ในแถบ "✅ พิมพ์แล้ว" ด้านบน':'กดปุ่ม "🔄 รีเฟรชออเดอร์ล่าสุด" ด้านบนเพื่อดึงข้อมูลใหม่จาก TikTok'}</span></div>`;
+  }).join('') : `<div class="empty"><div class="big">${State.apiPrintTab==='new'?'🎉':'📭'}</div>${State.apiPrintTab==='new'?'ไม่มีออเดอร์ใหม่ค้างพิมพ์แล้ว!':'ยังไม่มีรายการออเดอร์ในแถบพิมพ์แล้ว'}<br><span class="muted" style="font-size:13px">${State.apiPrintTab==='new'?'ออเดอร์ที่พิมพ์ไปแล้วจะย้ายไปอยู่ในแถบ "✅ ส่งพิมพ์แล้ว" ด้านบน':'กดปุ่ม "🔄 รีเฟรชออเดอร์ล่าสุด" ด้านบนเพื่อดึงข้อมูลใหม่จาก TikTok'}</span></div>`;
 
   main.innerHTML = `
     <div class="hero-banner" style="background:linear-gradient(135deg, #00997a 0%, #007a60 100%)">
       <div class="hero-title">🖨️ ปริ้นใบปะหน้า &amp; จัดการออเดอร์ TikTok</div>
-      <div class="hero-sub">ขั้นตอนที่ 1: รับออเดอร์ + ปริ้นใบปะหน้า (100×150mm) เมื่อปริ้นเสร็จระบบจะส่งไปหน้า "สแกนแพ็ค" ของวันนี้ให้อัตโนมัติ</div>
+      <div class="hero-sub">ขั้นตอนที่ 1: รับออเดอร์ + ปริ้นใบปะหน้า (100×150mm) เมื่อส่งพิมพ์เข้าคิวสำเร็จ ระบบจะส่งไปหน้า "สแกนแพ็ค" ของวันนี้ให้อัตโนมัติ</div>
       <div class="hero-cta-row">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="hero-cta-btn" id="ap-refresh-top" style="background:#17151c">🔄 รีเฟรชออเดอร์ล่าสุด</button>
@@ -6090,7 +6091,7 @@ function renderApiPrintDOM(){
         🆕 ออเดอร์ใหม่ / รอพิมพ์ (${newTabCount})
       </button>
       <button type="button" id="ap-subtab-printed" style="flex:1;padding:10px 14px;border-radius:14px;border:none;font-family:var(--disp);font-weight:800;font-size:13.5px;cursor:pointer;transition:all .15s;${State.apiPrintTab==='printed'?'background:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(86,54,211,0.28)':'background:transparent;color:var(--muted)'}">
-        ✅ พิมพ์แล้ว (${printedTabCount})
+        ✅ ส่งพิมพ์แล้ว (${printedTabCount})
       </button>
     </div>
 
@@ -6106,7 +6107,7 @@ function renderApiPrintDOM(){
 
 
       <div class="row" style="margin-top:8px">
-        <button class="btn" id="ap-batch-print-btn" style="background:${State.apiPrintTab==='new'?'#00997a':'var(--accent)'};flex:2">${State.apiPrintTab==='new'?'🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)':'🖨️ พิมพ์ใบปะหน้าซ้ำ (รวมไฟล์เดียว)'}</button>
+        <button class="btn" id="ap-batch-print-btn" style="background:${State.apiPrintTab==='new'?'#00997a':'var(--accent)'};flex:2">${State.apiPrintTab==='new'?'🚚 เตรียมการจัดส่ง + ส่งพิมพ์เข้า 9920 UW':'🖨️ พิมพ์ใบปะหน้าซ้ำ (รวมไฟล์เดียว)'}</button>
         <button class="btn secondary" id="ap-picklist-btn" style="flex:1">📋 ใบสรุปหยิบของ</button>
       </div>
     </div>
@@ -6311,6 +6312,12 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
     const validGroup = group.filter(ao => String(ao.id || ao.order_id || '').trim());
     if(!validGroup.length) continue;
 
+    const submitted = validGroup.every(o => o._printSubmission?.status === 'submitted');
+    const printSubmission = submitted ? {
+      status: 'submitted', printer: PACKCHECK_PRINT.printer,
+      submittedAt: new Date().toISOString(),
+      jobs: validGroup.flatMap(o => o._printSubmission.jobs || [])
+    } : null;
     const isMerged = validGroup.length >= 2;
     if(isMerged) mergedGroupCount++;
 
@@ -6381,7 +6388,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
 
     if(prevDoc){
       // คืนสถานะการสแกนเดิม + อัปเดต Tracking Number ใหม่
-      let changed = false;
+      let changed = submitted;
       if(bestTracking && prevDoc.tracking !== bestTracking){ updatedTrkCount++; changed = true; }
       if(isMerged && !Array.isArray(prevDoc.originalOrderIds)) changed = true;
 
@@ -6409,6 +6416,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
         packedBy: autoDone ? (prevDoc.packedBy || State.staffName || 'ระบบ API') : prevDoc.packedBy,
         updatedAt: Date.now()
       };
+      if(printSubmission) updatedObj.printSubmission = printSubmission;
       if(isMerged) updatedObj.originalOrderIds = origIds;
       writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(updatedObj) });
     } else {
@@ -6429,6 +6437,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
         packedBy: autoDone ? (State.staffName || 'ระบบ API') : undefined,
         updatedAt: Date.now()
       };
+      if(printSubmission) orderObj.printSubmission = printSubmission;
       if(isMerged) orderObj.originalOrderIds = origIds;
       writeEntries.push({ key: orderKey(date, finalOrderId), value: JSON.stringify(orderObj) });
       newCount++;
@@ -6581,140 +6590,202 @@ document.getElementById('co-confirm-combine-btn').onclick = () => {
   executeBatchShipAndPrint(State.pendingPrintSelected, true, confirmedGroupMap);
 };
 
-async function executeBatchShipAndPrint(selected, shouldCombine = false, confirmedGroupMap = {}){
-  if(!selected || !selected.length) return;
-  const btn = document.getElementById('ap-batch-print-btn');
-  const origText = btn ? btn.textContent : '🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)';
-  if(btn) btn.disabled = true;
+// Direct printing: a receipt confirms submission to Windows, not physical paper output.
+const PACKCHECK_PRINT = Object.freeze({
+  printer: '9920 UW',
+  url: 'http://127.0.0.1:19123/print-pdf',
+  key: 'ac0f4f02c23cb469c4a7fb8050a1b1b8556d391ae3a0bcdad9b679e0b42c6aef'
+});
+State.labelPrintBusy = false;
 
+async function printBridgeRequest(path, options = {}){
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.method === 'POST' ? 125000 : 10000);
   try{
-    // จัดกลุ่มตาม Package ID เพื่อไม่ยิงซ้ำในพัสดุที่รวมกันแล้ว
-    const seenPkg = new Set();
-    const packages = [];
-    selected.forEach(ao => {
-      const pkgId = ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '';
-      if(pkgId && !seenPkg.has(pkgId)){
-        seenPkg.add(pkgId);
-        packages.push({
-          order_id: String(ao.id || ao.order_id),
-          package_id: pkgId,
-          need_ship: ao.status === 'AWAITING_SHIPMENT'
-        });
-      }
+    const response = await fetch(new URL(path, PACKCHECK_PRINT.url).href, {
+      ...options, signal: controller.signal,
+      headers: { 'X-PackCheck-Key': PACKCHECK_PRINT.key, ...options.headers }
     });
+    let result;
+    try { result = await response.json(); } catch(e) { throw new Error('ตัวช่วยพิมพ์ตอบกลับไม่ถูกต้อง กรุณาใช้ตัวช่วยรุ่นใหม่'); }
+    if(!response.ok || !result.ok) throw new Error(result.error || `ตัวช่วยพิมพ์ HTTP ${response.status}`);
+    if(result.printer !== PACKCHECK_PRINT.printer) throw new Error('ตัวช่วยพิมพ์เลือกเครื่องไม่ตรงกับ 9920 UW');
+    return result;
+  }catch(e){
+    if(e.name === 'AbortError') throw new Error('ตัวช่วยพิมพ์ไม่ตอบกลับทันเวลา ตรวจคิว 9920 UW ก่อนลองใหม่');
+    if(e instanceof TypeError) throw new Error('เชื่อมต่อตัวช่วยพิมพ์ไม่ได้: เปิด Start-Print-Bridge.cmd บนคอมที่ต่อ 9920 UW และอนุญาตการเข้าถึงเครือข่ายภายในให้เว็บหากเบราว์เซอร์ถาม');
+    throw e;
+  }finally{ clearTimeout(timeout); }
+}
 
-    if(!packages.length){
-      toast('⚠️ ไม่พบ Package ID ในออเดอร์ที่เลือก');
-      if(btn){ btn.disabled = false; btn.textContent = origText; }
-      return;
-    }
+async function checkPrintBridge(){
+  const health = await printBridgeRequest('/health');
+  if(health.protocol !== 2 || !health.ready) throw new Error(health.error || 'ตัวช่วยพิมพ์ยังไม่พร้อม');
+  return health;
+}
 
-    const CHUNK_SIZE = 10;
-    const allResults = [];
-    for(let i = 0; i < packages.length; i += CHUNK_SIZE){
-      const chunk = packages.slice(i, i + CHUNK_SIZE);
-      if(btn) btn.textContent = `⏳ กำลังรับออเดอร์และดึงใบปะหน้า (${Math.min(i + CHUNK_SIZE, packages.length)}/${packages.length})...`;
-      const res = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packages: chunk })
+function labelPackageIds(order){
+  return [...new Set([
+    ...(order.packages || []).map(p => p.id || p.package_id),
+    ...(order.package_list || []).map(p => p.package_id || p.id)
+  ].filter(Boolean).map(String))];
+}
+
+async function labelWorkerRequest(packages){
+  const response = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ packages })
+  });
+  const result = await response.json();
+  if(!response.ok || (result.code !== undefined && result.code !== 0) || !Array.isArray(result.results)){
+    throw new Error(result.message || result.error || `ดึงใบปะหน้าไม่สำเร็จ (HTTP ${response.status})`);
+  }
+  return result.results;
+}
+
+async function prepareLabelFiles(orders){
+  if(typeof PDFLib === 'undefined') throw new Error('โหลดเครื่องมือ PDF ไม่สำเร็จ กรุณารีเฟรชหน้าเว็บ');
+  const packages = new Map();
+  for(const order of orders){
+    const ids = labelPackageIds(order);
+    if(!ids.length) throw new Error(`ออเดอร์ ${order.id || order.order_id} ไม่มี Package ID จึงยังไม่ส่งพิมพ์`);
+    for(const id of ids){
+      if(!packages.has(id)) packages.set(id, {
+        order_id: String(order.id || order.order_id), package_id: id,
+        need_ship: order.status === 'AWAITING_SHIPMENT'
       });
-      const json = await res.json();
-      if(json.code !== undefined && json.code !== 0 && !json.results){
-        throw new Error(json.message || json.error || 'Worker Error');
-      }
-      if(Array.isArray(json.results)) allResults.push(...json.results);
     }
-
-    // รอ 2 วินาทีแล้วดึงซ้ำให้อัตโนมัติหาก TikTok เพิ่งกดจัดส่งและ PDF ยังสร้างไม่เสร็จ
-    const missingPkgs = allResults.filter(r => !r.doc_url && r.package_id).map(r => ({
-      order_id: r.order_id,
-      package_id: r.package_id,
-      need_ship: false
-    }));
-    if(missingPkgs.length > 0){
-      if(btn) btn.textContent = `⏳ รอ TikTok สร้างไฟล์ใบปะหน้าอีก ${missingPkgs.length} ใบ...`;
-      await sleep(2000);
-      for(let i = 0; i < missingPkgs.length; i += CHUNK_SIZE){
-        const chunk = missingPkgs.slice(i, i + CHUNK_SIZE);
-        const res2 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: chunk })
-        });
-        const json2 = await res2.json();
-        if(Array.isArray(json2.results)){
-          json2.results.forEach(r2 => {
-            const idx = allResults.findIndex(x => x.package_id === r2.package_id);
-            if(idx >= 0 && r2.doc_url) allResults[idx] = r2;
-          });
-        }
+  }
+  const results = new Map();
+  for(let attempt = 0; attempt < 3; attempt++){
+    const pending = [...packages.values()].filter(p => !results.get(p.package_id)?.doc_url);
+    if(!pending.length) break;
+    if(attempt) await sleep(2000);
+    for(let i = 0; i < pending.length; i += 10){
+      const chunk = pending.slice(i, i + 10).map(p => ({ ...p, need_ship: attempt ? false : p.need_ship }));
+      for(const result of await labelWorkerRequest(chunk)){
+        const id = String(result.package_id || '');
+        if(packages.has(id) && (!results.get(id)?.doc_url || result.doc_url)) results.set(id, result);
       }
     }
+  }
+  const missing = [...packages.keys()].filter(id => !results.get(id)?.doc_url);
+  if(missing.length) throw new Error(`ยังได้ใบปะหน้าไม่ครบ ${missing.length} พัสดุ: ${missing.join(', ')} — ยังไม่ส่งพิมพ์ กรุณาลองใหม่`);
 
-    const docUrls = [...new Set(allResults.map(r => r.doc_url).filter(Boolean))];
-    const firstErr = allResults.find(r => !r.doc_url && r.message)?.message || '';
+  const documents = new Map();
+  for(const [id, result] of results){
+    if(!documents.has(result.doc_url)) documents.set(result.doc_url, { packageIds: [], url: result.doc_url });
+    documents.get(result.doc_url).packageIds.push(id);
+  }
+  const files = [];
+  // Download and validate EVERY document before submitting any print job.
+  for(const document of documents.values()){
+    const response = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(document.url)}`);
+    if(!response.ok) throw new Error(`ดาวน์โหลด PDF ไม่สำเร็จ (HTTP ${response.status}) — ยังไม่ส่งพิมพ์`);
+    const bytes = await response.arrayBuffer();
+    const pdf = await PDFLib.PDFDocument.load(bytes);
+    if(!pdf.getPageCount()) throw new Error('ไฟล์ใบปะหน้าไม่มีหน้าเอกสาร — ยังไม่ส่งพิมพ์');
+    files.push({ ...document, pdf, bytes, blob: new Blob([bytes], { type: 'application/pdf' }) });
+  }
+  if(!files.length) throw new Error('ไม่พบไฟล์ใบปะหน้า — ยังไม่ส่งพิมพ์');
+  return { files, results };
+}
 
-    // อัปเดตสถานะและ Tracking Number กลับเข้า State และส่งไปหน้า "สแกนแพ็ค" ของวันนี้
-    const trkByOrder = {};
-    allResults.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
-    selected.forEach(ao => {
-      const oid = String(ao.id || ao.order_id);
-      ao.status = 'AWAITING_COLLECTION';
-      if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
-      // ระบุกลุ่มรวมพัสดุตามที่ผู้ใช้กดยืนยันในป๊อปอัป (หรือแยกเดี่ยวถ้ากดไม่รวม)
-      ao._forceGroupKey = (shouldCombine && confirmedGroupMap[oid]) ? confirmedGroupMap[oid] : ('SINGLE:' + oid);
+async function labelJobId(packageIds, nonce = ''){
+  if(!globalThis.crypto?.subtle) throw new Error('เบราว์เซอร์นี้ไม่รองรับรหัสงานพิมพ์ กรุณาเปิดเว็บผ่าน HTTPS หรือไฟล์บนคอม');
+  const identity = JSON.stringify([PACKCHECK_PRINT.printer, [...packageIds].sort(), nonce]);
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
+  return 'pc2-' + Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function previewLabelFiles(files){
+  const merged = await PDFLib.PDFDocument.create();
+  for(const file of files){
+    const pages = await merged.copyPages(file.pdf, file.pdf.getPageIndices());
+    pages.forEach(page => merged.addPage(page));
+  }
+  const url = URL.createObjectURL(new Blob([await merged.save()], { type: 'application/pdf' }));
+  const preview = window.open(url, '_blank');
+  if(!preview){ URL.revokeObjectURL(url); throw new Error('เบราว์เซอร์บล็อกหน้าต่าง PDF กรุณาอนุญาตป๊อปอัป'); }
+  setTimeout(() => URL.revokeObjectURL(url), 300000);
+}
+
+async function submitLabelFiles(files, forceReprint = false){
+  const receipts = [];
+  for(const file of files){
+    // Keep a reprint's nonce through failures/reloads, until packing data is saved.
+    const reprintKey = forceReprint ? 'packcheck_reprint_v2:' + [...file.packageIds].sort().join(',') : '';
+    let nonce = '';
+    if(reprintKey){
+      nonce = localStorage.getItem(reprintKey) || `${Date.now()}-${crypto.randomUUID()}`;
+      localStorage.setItem(reprintKey, nonce);
+    }
+    const jobId = await labelJobId(file.packageIds, nonce);
+    const result = await printBridgeRequest('/print-pdf', {
+      method: 'POST', body: file.blob,
+      headers: { 'Content-Type': 'application/pdf', 'X-PackCheck-Job': jobId }
     });
+    if(result.status !== 'submitted' || result.jobId !== jobId) throw new Error('ตัวช่วยพิมพ์ยังไม่ยืนยันการส่งงานเข้าคิว');
+    receipts.push({ jobId, packageIds: file.packageIds, submittedAt: result.submittedAt, printer: result.printer, reprintKey });
+  }
+  return receipts;
+}
 
-    const packDate = todayStr();
-    State.date = packDate;
-    await upsertApiOrdersToPackCheck(selected, false, false, packDate, true);
-    markApiOrdersAsPrinted(selected.map(ao => String(ao.id || ao.order_id)));
-    State.apiOrdersPicked.clear();
-    applyApiPrintFilters(false);
+async function finishLabelSubmission(orders, batch, receipts, cfg, confirmedGroupMap = {}){
+  const packDate = todayStr();
+  for(const order of orders){
+    const id = String(order.id || order.order_id);
+    order.status = 'AWAITING_COLLECTION';
+    const results = labelPackageIds(order).map(id => batch.results.get(id));
+    const tracking = results.find(r => r?.tracking_number)?.tracking_number;
+    if(tracking) order.tracking_number = tracking;
+    order._forceGroupKey = confirmedGroupMap[id] || ('SINGLE:' + id);
+    order._printSubmission = {
+      status: 'submitted', printer: PACKCHECK_PRINT.printer,
+      submittedAt: new Date().toISOString(),
+      jobs: receipts.filter(r => r.packageIds.some(p => labelPackageIds(order).includes(p)))
+    };
+  }
+  State.date = packDate;
+  await upsertApiOrdersToPackCheck(orders, true, false, packDate, true);
+  markApiOrdersAsPrinted(orders.map(o => String(o.id || o.order_id)));
+  for(const receipt of receipts){
+    if(receipt.reprintKey) localStorage.removeItem(receipt.reprintKey);
+  }
+  // Preview failure must not undo or misreport an already submitted print job.
+  if(cfg.autoPrintPopup){
+    try { await previewLabelFiles(batch.files); }
+    catch(e){ toast('ส่งพิมพ์เข้า 9920 UW แล้ว แต่เปิดตัวอย่าง PDF ไม่ได้: ' + e.message); }
+  }
+}
 
-    if(!docUrls.length){
-      toast('❌ พิมพ์ไม่สำเร็จ: ' + (firstErr || 'TikTok ยังไม่ออกไฟล์ใบปะหน้าให้ (ลองกดใหม่อีกครั้ง)'));
-      if(btn){ btn.disabled = false; btn.textContent = origText; }
-      renderApiPrintDOM();
+async function executeBatchShipAndPrint(selected, shouldCombine = false, confirmedGroupMap = {}){
+  if(!selected?.length) return;
+  if(State.labelPrintBusy || State.autoBotRunning){ toast('กำลังส่งงานพิมพ์ กรุณารอให้รอบปัจจุบันเสร็จ'); return; }
+  State.labelPrintBusy = true;
+  const button = document.getElementById('ap-batch-print-btn');
+  const original = button?.textContent;
+  if(button){ button.disabled = true; button.textContent = 'กำลังตรวจเครื่องพิมพ์และเตรียม PDF...'; }
+  try{
+    const cfg = State.autoBotCfg;
+    if(cfg.useSilentPrintServer) await checkPrintBridge();
+    const batch = await prepareLabelFiles(selected);
+    if(!cfg.useSilentPrintServer){
+      await previewLabelFiles(batch.files);
+      toast('เปิด PDF แล้ว — ยังไม่บันทึกว่าส่งพิมพ์ เปิดตัวเลือกส่งพิมพ์ตรงเพื่อส่งเข้า 9920 UW');
       return;
     }
-
-    if(btn) btn.textContent = `📄 กำลังรวมไฟล์ PDF ทั้งหมด (${docUrls.length} ใบ)...`;
-
-    // รวมไฟล์ PDF ทุกออเดอร์ให้เป็นไฟล์ PDF เดียวกัน!
-    let mergedCount = 0;
-    if(typeof PDFLib !== 'undefined'){
-      const mergedPdf = await PDFLib.PDFDocument.create();
-      for(const u of docUrls){
-        try{
-          const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
-          if(!pdfResp.ok) continue;
-          const pdfBytes = await pdfResp.arrayBuffer();
-          const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
-          const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
-          copiedPages.forEach(p => mergedPdf.addPage(p));
-          mergedCount++;
-        }catch(e){ console.error('Failed to merge one PDF page', e); }
-      }
-      if(mergedCount > 0){
-        const mergedBytes = await mergedPdf.save();
-        const blob = new Blob([mergedBytes], { type: 'application/pdf' });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
-      } else {
-        window.open(docUrls[0], '_blank');
-      }
-    } else {
-      window.open(docUrls[0], '_blank');
-    }
-
-    toast(`✅ พิมพ์ใบปะหน้าสำเร็จ และส่ง ${selected.length} ออเดอร์ไปหน้า "สแกนแพ็ค" (${fmtDateTH(packDate)}) แล้ว!`);
-    if(btn){ btn.disabled = false; btn.textContent = origText; }
-    renderApiPrintDOM();
-  }catch(err){
-    toast('❌ เกิดข้อผิดพลาด: ' + err.message);
-    if(btn){ btn.disabled = false; btn.textContent = origText; }
+    const receipts = await submitLabelFiles(batch.files, State.apiPrintTab === 'printed');
+    await finishLabelSubmission(selected, batch, receipts, cfg, shouldCombine ? confirmedGroupMap : {});
+    State.apiOrdersPicked.clear();
+    toast(`✅ ส่ง ${selected.length} ออเดอร์เข้าคิว 9920 UW และหน้าแพ็คแล้ว กรุณาตรวจใบที่เครื่องพิมพ์`);
+  }catch(e){
+    console.error('PackCheck direct print failed', e);
+    toast('❌ ' + e.message);
+  }finally{
+    State.labelPrintBusy = false;
+    if(button){ button.disabled = false; button.textContent = original; }
+    if(State.view === 'api-print') applyApiPrintFilters(true);
   }
 }
 
@@ -6726,9 +6797,9 @@ const AUTOBOT_CFG_KEY = 'config:autobot';
 State.autoBotCfg = {
   enabled: false,
   autoMergeSameAddr: true,
-  autoPrintPopup: true,
-  silentPrintUrl: 'http://127.0.0.1:9123/print-pdf', // พอร์ตสำหรับโปรแกรมพิมพ์ตรงออกเครื่องปริ้นที่ร้าน (ถ้าเปิดใช้)
-  useSilentPrintServer: false,
+  autoPrintPopup: false,
+  silentPrintUrl: 'http://127.0.0.1:19123/print-pdf', // พอร์ตสำหรับโปรแกรมพิมพ์ตรงออกเครื่องปริ้นที่ร้าน (ถ้าเปิดใช้)
+  useSilentPrintServer: true,
   schedules: ['09:00', '12:00', '15:00', '17:30'],
   lastRunMap: {}, // { '2026-11-27_09:00': { ts, count, status } }
   logs: [] // [{ ts, round, count, msg }]
@@ -6741,6 +6812,8 @@ async function loadAutoBotConfig(){
     if(raw){
       const parsed = JSON.parse(raw);
       State.autoBotCfg = Object.assign({}, State.autoBotCfg, parsed);
+      State.autoBotCfg.useSilentPrintServer = localStorage.getItem('packcheck_9920_direct_mode') !== '0';
+      State.autoBotCfg.autoPrintPopup = localStorage.getItem('packcheck_9920_preview') === '1';
       if(!Array.isArray(State.autoBotCfg.schedules)) State.autoBotCfg.schedules = ['09:00', '15:00'];
       if(!State.autoBotCfg.lastRunMap) State.autoBotCfg.lastRunMap = {};
       if(!Array.isArray(State.autoBotCfg.logs)) State.autoBotCfg.logs = [];
@@ -6794,7 +6867,7 @@ function renderAutoBotDOM(){
           <div>
             <div class="mono" style="font-size:18px;font-weight:800;color:var(--text)">🕒 ${esc(t)} น.</div>
             <div style="font-size:12px;color:${ranInfo?'#047857':'var(--muted)'};font-weight:600">
-              ${ranInfo ? `✅ ทำงานแล้ววันนี้ (${ranInfo.count} ออเดอร์)` : '⏳ รอถึงเวลาทำงานอัตโนมัติ'}
+              ${ranInfo ? (ranInfo.status === 'error' ? '❌ รอบนี้มีข้อผิดพลาด — ดูประวัติด้านล่าง' : ranInfo.status === 'running' ? '⏳ กำลังทำงาน' : `✅ ส่งงานแล้ววันนี้ (${ranInfo.count} ออเดอร์)`) : '⏳ รอถึงเวลาทำงานอัตโนมัติ'}
             </div>
           </div>
         </div>
@@ -6853,7 +6926,10 @@ function renderAutoBotDOM(){
       ${cfg.useSilentPrintServer ? `
         <div style="margin-top:8px;padding:12px;background:#f8f6fe;border-radius:14px;border:1px solid var(--border)">
           <label>URL ตัวช่วยพิมพ์ตรงบนเครื่องคอมที่ร้าน (Local Print Bridge)</label>
-          <input type="text" id="bot-silent-url" value="${esc(cfg.silentPrintUrl)}" style="margin-bottom:8px;font-family:var(--mono);font-size:13px">
+          <input readonly title="เครื่องพิมพ์ 9920 UW บนคอมเครื่องนี้" type="text" id="bot-silent-url" value="${esc(PACKCHECK_PRINT.url)}" style="margin-bottom:8px;font-family:var(--mono);font-size:13px">
+          <div style="font-size:12.5px;margin:8px 0">เครื่องพิมพ์: <b>9920 UW</b> · ใช้ขนาดกระดาษเริ่มต้นของเครื่องพิมพ์ใน Windows (ตั้งเป็น TikTok New ตามที่ใช้งาน)</div>
+          <button type="button" class="btn secondary" id="bot-check-bridge">ตรวจการเชื่อมต่อ 9920 UW</button>
+          <div id="bot-bridge-status" style="font-size:12.5px;margin:8px 0" role="status">เปิด Start-Print-Bridge.cmd บนคอมเครื่องนี้ก่อนรันบอท</div>
           <button type="button" class="btn secondary" id="bot-dl-bridge-btn" style="font-size:12.5px;min-height:38px">⬇️ ดาวน์โหลดสคริปต์ตัวช่วยพิมพ์ตรงสำหรับ Windows PC (.ps1)</button>
         </div>
       ` : ''}
@@ -6916,20 +6992,31 @@ function wireAutoBotDOM(){
   };
   document.getElementById('bot-opt-popup').onchange = async (e) => {
     cfg.autoPrintPopup = e.target.checked;
+    localStorage.setItem('packcheck_9920_preview', e.target.checked ? '1' : '0');
     await saveAutoBotConfig();
   };
   document.getElementById('bot-opt-silent').onchange = async (e) => {
     cfg.useSilentPrintServer = e.target.checked;
+    localStorage.setItem('packcheck_9920_direct_mode', e.target.checked ? '1' : '0');
     await saveAutoBotConfig();
     renderAutoBotDOM();
   };
   const silentUrlInp = document.getElementById('bot-silent-url');
   if(silentUrlInp){
     silentUrlInp.onchange = async (e) => {
-      cfg.silentPrintUrl = e.target.value.trim() || 'http://127.0.0.1:9123/print-pdf';
+      cfg.silentPrintUrl = e.target.value.trim() || 'http://127.0.0.1:19123/print-pdf';
       await saveAutoBotConfig();
     };
   }
+  const checkBridgeBtn = document.getElementById('bot-check-bridge');
+  if(checkBridgeBtn) checkBridgeBtn.onclick = async () => {
+    checkBridgeBtn.disabled = true;
+    const status = document.getElementById('bot-bridge-status');
+    status.textContent = 'กำลังตรวจสอบ...';
+    try { await checkPrintBridge(); status.textContent = '✅ พร้อมส่งงานเข้า 9920 UW (ยังไม่ได้พิมพ์ใบทดสอบ)'; }
+    catch(e){ status.textContent = '❌ ' + e.message; }
+    finally { checkBridgeBtn.disabled = false; }
+  };
   const dlBridgeBtn = document.getElementById('bot-dl-bridge-btn');
   if(dlBridgeBtn){
     dlBridgeBtn.onclick = downloadWindowsSilentPrintScript;
@@ -6945,208 +7032,75 @@ function wireAutoBotDOM(){
 }
 
 function downloadWindowsSilentPrintScript(){
-  const psScript = `# PackCheck Local Silent Print Bridge for Windows (100x150mm Thermal Printer)
-# วิธีใช้: คลิกขวาที่ไฟล์นี้ -> Run with PowerShell (เปิดทิ้งไว้ที่เครื่องคอมพิวเตอร์ร้าน)
-$listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add("http://127.0.0.1:9123/")
-$listener.Start()
-Write-Host "PackCheck Silent Print Bridge Ready on http://127.0.0.1:9123/" -ForegroundColor Green
-while ($listener.IsListening) {
-    $ctx = $listener.GetContext()
-    $req = $ctx.Request
-    $res = $ctx.Response
-    $res.Headers.Add("Access-Control-Allow-Origin", "*")
-    $res.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS")
-    $res.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
-    if ($req.HttpMethod -eq "OPTIONS") { $res.StatusCode = 200; $res.Close(); continue }
-    if ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/print-pdf") {
-        $tmpPdf = [System.IO.Path]::Combine($env:TEMP, "packcheck_label_" + [DateTime]::Now.Ticks + ".pdf")
-        $fs = [System.IO.File]::Create($tmpPdf)
-        $req.InputStream.CopyTo($fs)
-        $fs.Close()
-        Write-Host "Printing label: $tmpPdf" -ForegroundColor Cyan
-        Start-Process -FilePath $tmpPdf -Verb Print -WindowStyle Hidden
-        $buf = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true}')
-        $res.OutputStream.Write($buf, 0, $buf.Length)
-    }
-    $res.Close()
-}
-`;
-  const blob = new Blob([psScript], { type: 'text/plain;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'PackCheck_AutoPrint_Bridge.ps1';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
-  toast('⬇️ ดาวน์โหลดไฟล์ตัวช่วยพิมพ์ตรงเรียบร้อย!');
+  const blob = new Blob(['\uFEFF', "# PackCheck direct print bridge. Runs as the current Windows user, loopback only.\n# Uses the printer's Windows default paper form. Set that to \"TikTok New\" first.\nparam([string]$SumatraPath = '', [switch]$CheckOnly)\n$ErrorActionPreference = 'Stop'\n$PrinterName = '9920 UW'\n$BridgeKey = 'ac0f4f02c23cb469c4a7fb8050a1b1b8556d391ae3a0bcdad9b679e0b42c6aef'\n$Port = 19123\n$MaxBytes = 32MB\n$JobsPath = Join-Path $PSScriptRoot 'print-jobs'\nNew-Item -ItemType Directory -Force -Path $JobsPath | Out-Null\nAdd-Type -AssemblyName System.Drawing\n\nfunction Get-PrintEngine {\n    if ($SumatraPath) {\n        if (!(Test-Path -LiteralPath $SumatraPath -PathType Leaf)) { throw 'SumatraPath does not exist.' }\n        return (Resolve-Path -LiteralPath $SumatraPath).Path\n    }\n    $candidates = @(\n        (Join-Path $PSScriptRoot 'tools\\SumatraPDF.exe'),\n        (Join-Path $env:LOCALAPPDATA 'SumatraPDF\\SumatraPDF.exe'),\n        (Join-Path $env:ProgramFiles 'SumatraPDF\\SumatraPDF.exe')\n    )\n    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'SumatraPDF\\SumatraPDF.exe' }\n    foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate } }\n    throw 'SumatraPDF is missing. Run Setup-Print-Engine.ps1 once, then start this bridge again.'\n}\n\nfunction Assert-Printer {\n    $names = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)\n    if ($names -notcontains $PrinterName) { throw \"Printer '$PrinterName' is not installed for this Windows user.\" }\n}\n\nfunction Write-JsonResponse($Stream, [int]$Status, $Payload, [string]$Origin) {\n    $body = [Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 8 -Compress))\n    $allowedOrigin = if ($Origin -match '^(null|https?://[^\\r\\n]+)$') { $Origin } else { 'null' }\n    $head = \"HTTP/1.1 $Status Response`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`nCache-Control: no-store`r`nAccess-Control-Allow-Origin: $allowedOrigin`r`nVary: Origin`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-PackCheck-Key, X-PackCheck-Job`r`nAccess-Control-Allow-Private-Network: true`r`n`r`n\"\n    $headerBytes = [Text.Encoding]::ASCII.GetBytes($head)\n    $Stream.Write($headerBytes, 0, $headerBytes.Length)\n    $Stream.Write($body, 0, $body.Length)\n    $Stream.Flush()\n}\n\nfunction Read-HttpRequest($Stream) {\n    $header = New-Object System.Collections.Generic.List[byte]\n    while ($true) {\n        $value = $Stream.ReadByte()\n        if ($value -lt 0) { throw 'Client disconnected before request headers.' }\n        $header.Add([byte]$value)\n        $n = $header.Count\n        if ($n -gt 16384) { throw 'HTTP headers too large.' }\n        if ($n -ge 4 -and $header[$n-4] -eq 13 -and $header[$n-3] -eq 10 -and $header[$n-2] -eq 13 -and $header[$n-1] -eq 10) { break }\n    }\n    $lines = [Text.Encoding]::ASCII.GetString($header.ToArray()) -split \"`r`n\"\n    $first = $lines[0] -split ' '\n    if ($first.Length -ne 3) { throw 'Invalid HTTP request.' }\n    $headers = @{}\n    foreach ($line in $lines[1..($lines.Length-1)]) {\n        $at = $line.IndexOf(':')\n        if ($at -gt 0) {\n            $name = $line.Substring(0, $at).Trim().ToLowerInvariant()\n            if ($headers.ContainsKey($name)) { throw 'Duplicate HTTP header.' }\n            $headers[$name] = $line.Substring($at+1).Trim()\n        }\n    }\n    return @{ Method = $first[0]; Path = $first[1]; Headers = $headers }\n}\n\n$Engine = Get-PrintEngine\nAssert-Printer\nif ($CheckOnly) { Write-Output \"READY: $PrinterName / $Engine\"; exit 0 }\n$listener = New-Object System.Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $Port)\ntry {\n    $listener.Start()\n    Write-Host \"PackCheck ready: http://127.0.0.1:$Port -> $PrinterName\" -ForegroundColor Green\n    Write-Host 'Keep this window running. Ctrl+C stops the bridge.'\n    while ($true) {\n        $client = $listener.AcceptTcpClient()\n        $stream = $null\n        $origin = 'null'\n        try {\n            $stream = $client.GetStream()\n            $stream.ReadTimeout = 15000\n            $stream.WriteTimeout = 15000\n            $request = Read-HttpRequest $stream\n            $origin = $request.Headers['origin']\n            if ($request.Headers['host'] -ne \"127.0.0.1:$Port\") {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Invalid Host header.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'OPTIONS') {\n                Write-JsonResponse $stream 200 @{ ok=$true } $origin\n                continue\n            }\n            if ($request.Headers['x-packcheck-key'] -cne $BridgeKey) {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Bridge key mismatch. Use index.html and bridge from the same package.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'GET' -and $request.Path -eq '/health') {\n                Assert-Printer\n                Write-JsonResponse $stream 200 @{ ok=$true; ready=$true; protocol=2; printer=$PrinterName } $origin\n                continue\n            }\n            if ($request.Method -ne 'POST' -or $request.Path -ne '/print-pdf') {\n                Write-JsonResponse $stream 404 @{ ok=$false; error='Unknown endpoint.' } $origin\n                continue\n            }\n            if ($request.Headers.ContainsKey('transfer-encoding')) { throw 'Chunked transfer is unsupported. Send a PDF Blob with Content-Length.' }\n            $length = 0\n            if (![int]::TryParse($request.Headers['content-length'], [ref]$length) -or $length -lt 5 -or $length -gt $MaxBytes) {\n                throw 'PDF size must be between 5 bytes and 32 MB.'\n            }\n            if ($request.Headers['content-type'] -notmatch '^application/pdf(?:;|$)') { throw 'Content-Type must be application/pdf.' }\n            $jobId = $request.Headers['x-packcheck-job']\n            if ($jobId -notmatch '^pc2-[a-f0-9]{64}$') { throw 'Invalid job ID.' }\n            $bytes = New-Object byte[] $length\n            $offset = 0\n            while ($offset -lt $length) {\n                $read = $stream.Read($bytes, $offset, $length - $offset)\n                if ($read -le 0) { throw 'Incomplete PDF upload.' }\n                $offset += $read\n            }\n            if ([Text.Encoding]::ASCII.GetString($bytes,0,5) -ne '%PDF-') { throw 'The uploaded file is not a PDF.' }\n            $receiptPath = Join-Path $JobsPath ($jobId + '.json')\n            if (Test-Path -LiteralPath $receiptPath) {\n                $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json\n                if ($receipt.status -eq 'submitted') {\n                    Write-JsonResponse $stream 200 @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$receipt.submittedAt; duplicate=$true } $origin\n                } else {\n                    Write-JsonResponse $stream 409 @{ ok=$false; error=\"Print outcome uncertain for $jobId. Check the 9920 UW queue and paper before retrying. See print-jobs receipt.\" } $origin\n                }\n                continue\n            }\n            Assert-Printer\n            $pdfPath = Join-Path $JobsPath ($jobId + '.pdf')\n            [IO.File]::WriteAllBytes($pdfPath, $bytes)\n            # Save before launching: a crash or timeout must never silently submit twice.\n            @{ status='uncertain'; printer=$PrinterName; jobId=$jobId; createdAt=[DateTime]::UtcNow.ToString('o') } |\n                ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            $arguments = '-silent -print-to \"' + $PrinterName + '\" -print-settings \"fit\" \"' + $pdfPath + '\"'\n            $process = Start-Process -FilePath $Engine -ArgumentList $arguments -WindowStyle Hidden -PassThru\n            if (!$process.WaitForExit(90000)) {\n                throw \"Print process timed out. Check the 9920 UW queue before retrying ($jobId).\"\n            }\n            if ($process.ExitCode -ne 0) {\n                throw \"PDF print engine failed (exit $($process.ExitCode)). Check printer, driver, and queue ($jobId).\"\n            }\n            $submittedAt = [DateTime]::UtcNow.ToString('o')\n            $receipt = @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$submittedAt }\n            $receipt | ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            Write-Host \"SUBMITTED $jobId -> $PrinterName\" -ForegroundColor Cyan\n            Write-JsonResponse $stream 200 $receipt $origin\n        } catch {\n            $message = $_.Exception.Message\n            Write-Host $message -ForegroundColor Red\n            if ($stream) {\n                try { Write-JsonResponse $stream 500 @{ ok=$false; error=$message; printer=$PrinterName } $origin } catch { }\n            }\n        } finally {\n            if ($stream) { $stream.Dispose() }\n            $client.Close()\n        }\n    }\n} finally { $listener.Stop() }\n"], { type: 'text/plain;charset=utf-8' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = 'PackCheck_Print_Bridge.ps1';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  toast('ดาวน์โหลดตัวช่วยแล้ว ใช้ร่วมกับ SumatraPDF หรือชุด Start-Print-Bridge.cmd ที่ได้รับ');
 }
 
 // ฟังก์ชันหลักสำหรับบอทรับออเดอร์ + ปริ้นใบปะหน้าอัตโนมัติ
 async function runAutoPrintBotCycle(roundLabel){
-  if(State.autoBotRunning) return;
+  if(State.autoBotRunning || State.labelPrintBusy) return;
   State.autoBotRunning = true;
-  if(State.view === 'autobot') renderAutoBotDOM();
-
   const cfg = State.autoBotCfg;
+  if(State.view === 'autobot') renderAutoBotDOM();
   try{
-    toast(`🤖 [บอท ${roundLabel}] กำลังตรวจสอบออเดอร์ใหม่จาก TikTok Shop...`);
-    const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders?status=ALL_UNSHIPPED`);
-    const json = await res.json();
-    const allOrders = json.data?.orders || [];
-
-    // โหลดรายการที่เคยพิมพ์ไปแล้วของวันนี้จาก Firestore เพื่อกันพิมพ์ซ้ำข้ามเครื่อง
-    const today = todayStr();
-    try{
-      const existingToday = await getExistingOrderEntries(today);
-      existingToday.forEach(en => {
-        try{
-          const doc = JSON.parse(en.value);
-          const origs = (Array.isArray(doc.originalOrderIds) && doc.originalOrderIds.length) ? doc.originalOrderIds : [doc.orderId];
-          origs.forEach(id => State.apiPrintedIds.add(String(id)));
-        }catch(e){}
-      });
-    }catch(e){}
-
-    // คัดเฉพาะออเดอร์ใหม่ที่ยังไม่เคยพิมพ์
-    const newOrders = allOrders.filter(ao => !State.apiPrintedIds.has(String(ao.id || ao.order_id)));
-
-    if(newOrders.length === 0){
-      cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, msg: 'ไม่มีออเดอร์ใหม่ค้างพิมพ์' });
-      await saveAutoBotConfig();
-      toast(`🤖 [บอท ${roundLabel}] ไม่มีออเดอร์ใหม่ค้างพิมพ์`);
-      State.autoBotRunning = false;
-      if(State.view === 'autobot') renderAutoBotDOM();
+    if(!cfg.useSilentPrintServer) throw new Error('เปิดตัวเลือกส่งพิมพ์ตรงเข้า 9920 UW ก่อนรันบอทอัตโนมัติ');
+    await checkPrintBridge();
+    toast(`🤖 [บอท ${roundLabel}] กำลังตรวจสอบออเดอร์ใหม่...`);
+    const response = await fetch(`${TIKTOK_WORKER_URL}/api/orders?status=ALL_UNSHIPPED`);
+    const json = await response.json();
+    if(!response.ok || (json.code !== undefined && json.code !== 0) || !Array.isArray(json.data?.orders)){
+      throw new Error(json.message || json.error || 'ดึงออเดอร์ไม่สำเร็จ');
+    }
+    // An imported packing order alone is not evidence of a print submission.
+    const existing = await getExistingOrderEntries(todayStr());
+    for(const entry of existing){
+      let order;
+      try { order = JSON.parse(entry.value); } catch(e) { continue; }
+      if(order.printSubmission?.status !== 'submitted') continue;
+      const ids = order.originalOrderIds?.length ? order.originalOrderIds : [order.orderId];
+      ids.forEach(id => State.apiPrintedIds.add(String(id)));
+    }
+    const orders = json.data.orders.filter(o => !State.apiPrintedIds.has(String(o.id || o.order_id)));
+    if(!orders.length){
+      cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, status: 'done', msg: 'ไม่มีออเดอร์ใหม่ค้างส่งพิมพ์' });
+      toast(`🤖 [บอท ${roundLabel}] ไม่มีออเดอร์ใหม่ค้างส่งพิมพ์`);
       return;
     }
-
-    // จัดกลุ่มรวมพัสดุที่อยู่เดียวกันอัตโนมัติ (ถ้าเปิดใช้งาน)
-    const { byKey } = buildSameAddressGroups(newOrders);
-    const confirmedGroupMap = {};
+    const groups = {};
     if(cfg.autoMergeSameAddr){
-      Object.entries(byKey).forEach(([gKey, grp]) => {
-        if(grp.length >= 2){
-          grp.forEach(ao => { confirmedGroupMap[String(ao.id || ao.order_id)] = gKey; });
-        }
+      const { byKey } = buildSameAddressGroups(orders);
+      Object.entries(byKey).forEach(([key, group]) => {
+        if(group.length >= 2) group.forEach(o => { groups[String(o.id || o.order_id)] = key; });
       });
     }
-
-    // ยิงจัดส่ง + ดึงใบปะหน้า PDF
-    const seenPkg = new Set();
-    const packages = [];
-    newOrders.forEach(ao => {
-      const pkgId = ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '';
-      if(pkgId && !seenPkg.has(pkgId)){
-        seenPkg.add(pkgId);
-        packages.push({
-          order_id: String(ao.id || ao.order_id),
-          package_id: pkgId,
-          need_ship: ao.status === 'AWAITING_SHIPMENT'
-        });
-      }
-    });
-
-    const CHUNK_SIZE = 10;
-    const allResults = [];
-    for(let i = 0; i < packages.length; i += CHUNK_SIZE){
-      const chunk = packages.slice(i, i + CHUNK_SIZE);
-      const r1 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packages: chunk })
-      });
-      const j1 = await r1.json();
-      if(Array.isArray(j1.results)) allResults.push(...j1.results);
-    }
-
-    // รอ 2 วิ ดึงซ้ำสำหรับใบที่ PDF เพิ่งสร้าง
-    const missingPkgs = allResults.filter(r => !r.doc_url && r.package_id).map(r => ({
-      order_id: r.order_id, package_id: r.package_id, need_ship: false
-    }));
-    if(missingPkgs.length > 0){
-      await sleep(2000);
-      for(let i = 0; i < missingPkgs.length; i += CHUNK_SIZE){
-        const chunk = missingPkgs.slice(i, i + CHUNK_SIZE);
-        const r2 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packages: chunk })
-        });
-        const j2 = await r2.json();
-        if(Array.isArray(j2.results)){
-          j2.results.forEach(item => {
-            const idx = allResults.findIndex(x => x.package_id === item.package_id);
-            if(idx >= 0 && item.doc_url) allResults[idx] = item;
-          });
-        }
-      }
-    }
-
-    const trkByOrder = {};
-    allResults.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
-    newOrders.forEach(ao => {
-      const oid = String(ao.id || ao.order_id);
-      ao.status = 'AWAITING_COLLECTION';
-      if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
-      ao._forceGroupKey = (cfg.autoMergeSameAddr && confirmedGroupMap[oid]) ? confirmedGroupMap[oid] : ('SINGLE:' + oid);
-    });
-
-    // ส่งเข้าหน้า "สแกนแพ็ค" ของวันนี้ + มาร์คว่าพิมพ์แล้ว
-    State.date = today;
-    await upsertApiOrdersToPackCheck(newOrders, true, false, today, true);
-    markApiOrdersAsPrinted(newOrders.map(ao => String(ao.id || ao.order_id)));
-
-    const docUrls = [...new Set(allResults.map(r => r.doc_url).filter(Boolean))];
-    if(docUrls.length > 0 && typeof PDFLib !== 'undefined'){
-      const mergedPdf = await PDFLib.PDFDocument.create();
-      for(const u of docUrls){
-        try{
-          const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
-          if(!pdfResp.ok) continue;
-          const pdfBytes = await pdfResp.arrayBuffer();
-          const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
-          const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
-          copiedPages.forEach(p => mergedPdf.addPage(p));
-        }catch(e){}
-      }
-      const mergedBytes = await mergedPdf.save();
-      const blob = new Blob([mergedBytes], { type: 'application/pdf' });
-
-      // 1) ถ้าเปิดใช้ Silent Print Server บนเครื่องร้าน ให้ส่งไฟล์ PDF ไปพิมพ์ออกเครื่องปริ้นตรงๆ!
-      if(cfg.useSilentPrintServer && cfg.silentPrintUrl){
-        try{
-          await fetch(cfg.silentPrintUrl, { method: 'POST', body: blob });
-        }catch(e){ console.warn('Silent print bridge unreachable', e); }
-      }
-      // 2) เปิดหน้าต่าง PDF อัตโนมัติ (ถ้าเปิดไว้)
-      if(cfg.autoPrintPopup){
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
-      }
-    }
-
-    cfg.logs.unshift({
-      ts: Date.now(),
-      round: roundLabel,
-      count: newOrders.length,
-      msg: `รับออเดอร์และพิมพ์ใบปะหน้าสำเร็จ ${newOrders.length} ออเดอร์ (${docUrls.length} ใบปะหน้า)`
-    });
-    await saveAutoBotConfig();
-    toast(`✅ [บอท ${roundLabel}] พิมพ์ใบปะหน้า ${newOrders.length} ออเดอร์ และส่งเข้าหน้าแพ็คแล้ว!`);
-  }catch(err){
-    cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, msg: '❌ ผิดพลาด: ' + err.message });
-    await saveAutoBotConfig();
-    toast('❌ บอททำงานผิดพลาด: ' + err.message);
+    const batch = await prepareLabelFiles(orders);
+    const receipts = await submitLabelFiles(batch.files);
+    await finishLabelSubmission(orders, batch, receipts, cfg, groups);
+    cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: orders.length, status: 'done',
+      msg: `ส่ง ${orders.length} ออเดอร์เข้าคิว 9920 UW แล้ว (${batch.files.length} ไฟล์) — ตรวจใบที่เครื่องพิมพ์` });
+    toast(`✅ [บอท ${roundLabel}] ส่ง ${orders.length} ออเดอร์เข้าคิว 9920 UW และหน้าแพ็คแล้ว`);
+  }catch(e){
+    console.error('PackCheck auto print failed', e);
+    cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, status: 'error', msg: '❌ ' + e.message });
+    toast('❌ บอท: ' + e.message);
   }finally{
+    await saveAutoBotConfig();
     State.autoBotRunning = false;
     if(State.view === 'autobot') renderAutoBotDOM();
     if(State.view === 'api-print') applyApiPrintFilters(true);
   }
 }
 
+
 // ตัวจับเวลาเบื้องหลัง (เช็คทุก 15 วินาที)
 setInterval(async () => {
-  if(!State.autoBotCfg || !State.autoBotCfg.enabled || State.autoBotRunning) return;
+  if(!State.autoBotCfg || !State.autoBotCfg.enabled || State.autoBotRunning || State.labelPrintBusy) return;
   const now = new Date();
   const p = n => String(n).padStart(2, '0');
   const hhmm = `${p(now.getHours())}:${p(now.getMinutes())}`;
@@ -7160,7 +7114,7 @@ setInterval(async () => {
     await runAutoPrintBotCycle(hhmm);
     // อัปเดตจำนวนออเดอร์ล่าสุดลงใน lastRunMap
     const latestLog = State.autoBotCfg.logs[0];
-    State.autoBotCfg.lastRunMap[runKey] = { ts: Date.now(), count: latestLog ? latestLog.count : 0, status: 'done' };
+    State.autoBotCfg.lastRunMap[runKey] = { ts: Date.now(), count: latestLog ? latestLog.count : 0, status: latestLog?.status === 'error' ? 'error' : 'done' };
     await saveAutoBotConfig();
   }
 }, 15000);
