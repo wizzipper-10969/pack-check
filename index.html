@@ -5906,11 +5906,10 @@ async function fetchApiOrdersForPrintView(autoSyncToQueue = false){
     }
     State.apiOrdersAll = json.data?.orders || [];
     try{
-      const existingToday = await getExistingOrderEntries(todayStr());
+      const existingToday = await sListValues('order:', true, true);
       existingToday.forEach(en => {
         try{
           const doc = JSON.parse(en.value);
-          if(doc.printSubmission?.status !== 'submitted') return;
           const origs = (Array.isArray(doc.originalOrderIds) && doc.originalOrderIds.length) ? doc.originalOrderIds : [doc.orderId];
           origs.forEach(id => State.apiPrintedIds.add(String(id)));
         }catch(e){}
@@ -6598,6 +6597,36 @@ const PACKCHECK_PRINT = Object.freeze({
 });
 State.labelPrintBusy = false;
 
+// Legacy packing rows protect old orders from automatic reprinting. They are not
+// proof of physical printing, but must never become new work after an upgrade.
+async function loadApiPrintHistory(){
+  if(typeof backendReady !== 'undefined' && !backendReady) throw new Error('ฐานข้อมูลยังไม่พร้อม จึงยังไม่รันบอทเพื่อป้องกันพิมพ์ซ้ำ');
+  const [packingRows, receiptRows] = await Promise.all([
+    sListValues('order:', true, true),
+    sListValues('printledger:', true, true)
+  ]);
+  const knownOrders = new Set();
+  const submittedPackages = new Map();
+  for(const entry of packingRows){
+    let order;
+    try { order = JSON.parse(entry.value); }
+    catch(e){ throw new Error('อ่านประวัติแพ็คเดิมไม่สำเร็จ หยุดบอทเพื่อป้องกันพิมพ์ซ้ำ'); }
+    const ids = order.originalOrderIds?.length ? order.originalOrderIds : [order.orderId];
+    ids.filter(Boolean).forEach(id => knownOrders.add(String(id)));
+  }
+  for(const entry of receiptRows){
+    let receipt;
+    try { receipt = JSON.parse(entry.value); }
+    catch(e){ throw new Error('อ่านประวัติส่งพิมพ์ไม่สำเร็จ หยุดบอทเพื่อป้องกันพิมพ์ซ้ำ'); }
+    if(receipt.status === 'submitted' && receipt.packageId){
+      submittedPackages.set(String(receipt.packageId), receipt);
+    }
+  }
+  State.apiSubmittedPackages = submittedPackages;
+  knownOrders.forEach(id => State.apiPrintedIds.add(id));
+  return { knownOrders, submittedPackages };
+}
+
 async function printBridgeRequest(path, options = {}){
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.method === 'POST' ? 125000 : 10000);
@@ -6713,6 +6742,15 @@ async function previewLabelFiles(files){
 async function submitLabelFiles(files, forceReprint = false){
   const receipts = [];
   for(const file of files){
+    const known = file.packageIds.map(id => State.apiSubmittedPackages?.get(String(id)));
+    if(!forceReprint && known.every(Boolean)){
+      receipts.push({ jobId: known[0].jobId, packageIds: file.packageIds,
+        submittedAt: known[0].submittedAt, printer: known[0].printer });
+      continue;
+    }
+    if(!forceReprint && known.some(Boolean)){
+      throw new Error('ไฟล์รวมมีพัสดุที่เคยส่งพิมพ์แล้วบางส่วน จึงหยุดเพื่อป้องกันใบซ้ำ กรุณาตรวจและเลือกพิมพ์ซ้ำด้วยตนเอง');
+    }
     // Keep a reprint's nonce through failures/reloads, until packing data is saved.
     const reprintKey = forceReprint ? 'packcheck_reprint_v2:' + [...file.packageIds].sort().join(',') : '';
     let nonce = '';
@@ -6726,6 +6764,16 @@ async function submitLabelFiles(files, forceReprint = false){
       headers: { 'Content-Type': 'application/pdf', 'X-PackCheck-Job': jobId }
     });
     if(result.status !== 'submitted' || result.jobId !== jobId) throw new Error('ตัวช่วยพิมพ์ยังไม่ยืนยันการส่งงานเข้าคิว');
+    // Persist each successful file before moving on; survives partial batches,
+    // failed packing saves, origin changes, and a cleared localStorage.
+    const entries = file.packageIds.map(packageId => ({
+      key: 'printledger:package:' + packageId,
+      value: JSON.stringify({ status: 'submitted', packageId: String(packageId),
+        jobId, printer: result.printer, submittedAt: result.submittedAt })
+    }));
+    if(!State.apiSubmittedPackages) State.apiSubmittedPackages = new Map();
+    entries.forEach(entry => { const receipt = JSON.parse(entry.value); State.apiSubmittedPackages.set(receipt.packageId, receipt); });
+    await sBatchSet(entries);
     receipts.push({ jobId, packageIds: file.packageIds, submittedAt: result.submittedAt, printer: result.printer, reprintKey });
   }
   return receipts;
@@ -6769,6 +6817,12 @@ async function executeBatchShipAndPrint(selected, shouldCombine = false, confirm
   try{
     const cfg = State.autoBotCfg;
     if(cfg.useSilentPrintServer) await checkPrintBridge();
+    const history = await loadApiPrintHistory();
+    if(State.apiPrintTab !== 'printed'){
+      const previous = selected.filter(o => history.knownOrders.has(String(o.id || o.order_id)) ||
+        (labelPackageIds(o).length && labelPackageIds(o).every(id => history.submittedPackages.has(id))));
+      if(previous.length) throw new Error(`มี ${previous.length} ออเดอร์อยู่ในประวัติเดิม กรุณาเลือกจากแท็บส่งพิมพ์แล้วหากต้องการพิมพ์ซ้ำ`);
+    }
     const batch = await prepareLabelFiles(selected);
     if(!cfg.useSilentPrintServer){
       await previewLabelFiles(batch.files);
@@ -6935,7 +6989,7 @@ function renderAutoBotDOM(){
       ` : ''}
       <div style="margin-top:12px">
         <button type="button" class="btn" id="bot-run-now-btn" style="background:#00997a" ${State.autoBotRunning ? 'disabled' : ''}>
-          ${State.autoBotRunning ? '⏳ บอทกำลังทำงาน...' : '🚀 ทดสอบรันบอทรับออเดอร์ + ปริ้นทันที (1 รอบ)'}
+          ${State.autoBotRunning ? '⏳ บอทกำลังทำงาน...' : '🚀 ตรวจออเดอร์ใหม่และยืนยันส่งพิมพ์ (1 รอบ)'}
         </button>
       </div>
     </div>
@@ -7028,11 +7082,11 @@ function wireAutoBotDOM(){
     renderAutoBotDOM();
   };
 
-  document.getElementById('bot-run-now-btn').onclick = () => runAutoPrintBotCycle('รันทดสอบด้วยตนเอง');
+  document.getElementById('bot-run-now-btn').onclick = () => runAutoPrintBotCycle('รันทดสอบด้วยตนเอง', true);
 }
 
 function downloadWindowsSilentPrintScript(){
-  const blob = new Blob(['\uFEFF', "# PackCheck direct print bridge. Runs as the current Windows user, loopback only.\n# Uses the printer's Windows default paper form. Set that to \"TikTok New\" first.\nparam([string]$SumatraPath = '', [switch]$CheckOnly)\n$ErrorActionPreference = 'Stop'\n$PrinterName = '9920 UW'\n$BridgeKey = 'ac0f4f02c23cb469c4a7fb8050a1b1b8556d391ae3a0bcdad9b679e0b42c6aef'\n$Port = 19123\n$MaxBytes = 32MB\n$JobsPath = Join-Path $PSScriptRoot 'print-jobs'\nNew-Item -ItemType Directory -Force -Path $JobsPath | Out-Null\nAdd-Type -AssemblyName System.Drawing\n\nfunction Get-PrintEngine {\n    if ($SumatraPath) {\n        if (!(Test-Path -LiteralPath $SumatraPath -PathType Leaf)) { throw 'SumatraPath does not exist.' }\n        return (Resolve-Path -LiteralPath $SumatraPath).Path\n    }\n    $candidates = @(\n        (Join-Path $PSScriptRoot 'tools\\SumatraPDF.exe'),\n        (Join-Path $env:LOCALAPPDATA 'SumatraPDF\\SumatraPDF.exe'),\n        (Join-Path $env:ProgramFiles 'SumatraPDF\\SumatraPDF.exe')\n    )\n    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'SumatraPDF\\SumatraPDF.exe' }\n    foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate } }\n    throw 'SumatraPDF is missing. Run Setup-Print-Engine.ps1 once, then start this bridge again.'\n}\n\nfunction Assert-Printer {\n    $names = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)\n    if ($names -notcontains $PrinterName) { throw \"Printer '$PrinterName' is not installed for this Windows user.\" }\n}\n\nfunction Write-JsonResponse($Stream, [int]$Status, $Payload, [string]$Origin) {\n    $body = [Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 8 -Compress))\n    $allowedOrigin = if ($Origin -match '^(null|https?://[^\\r\\n]+)$') { $Origin } else { 'null' }\n    $head = \"HTTP/1.1 $Status Response`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`nCache-Control: no-store`r`nAccess-Control-Allow-Origin: $allowedOrigin`r`nVary: Origin`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-PackCheck-Key, X-PackCheck-Job`r`nAccess-Control-Allow-Private-Network: true`r`n`r`n\"\n    $headerBytes = [Text.Encoding]::ASCII.GetBytes($head)\n    $Stream.Write($headerBytes, 0, $headerBytes.Length)\n    $Stream.Write($body, 0, $body.Length)\n    $Stream.Flush()\n}\n\nfunction Read-HttpRequest($Stream) {\n    $header = New-Object System.Collections.Generic.List[byte]\n    while ($true) {\n        $value = $Stream.ReadByte()\n        if ($value -lt 0) { throw 'Client disconnected before request headers.' }\n        $header.Add([byte]$value)\n        $n = $header.Count\n        if ($n -gt 16384) { throw 'HTTP headers too large.' }\n        if ($n -ge 4 -and $header[$n-4] -eq 13 -and $header[$n-3] -eq 10 -and $header[$n-2] -eq 13 -and $header[$n-1] -eq 10) { break }\n    }\n    $lines = [Text.Encoding]::ASCII.GetString($header.ToArray()) -split \"`r`n\"\n    $first = $lines[0] -split ' '\n    if ($first.Length -ne 3) { throw 'Invalid HTTP request.' }\n    $headers = @{}\n    foreach ($line in $lines[1..($lines.Length-1)]) {\n        $at = $line.IndexOf(':')\n        if ($at -gt 0) {\n            $name = $line.Substring(0, $at).Trim().ToLowerInvariant()\n            if ($headers.ContainsKey($name)) { throw 'Duplicate HTTP header.' }\n            $headers[$name] = $line.Substring($at+1).Trim()\n        }\n    }\n    return @{ Method = $first[0]; Path = $first[1]; Headers = $headers }\n}\n\n$Engine = Get-PrintEngine\nAssert-Printer\nif ($CheckOnly) { Write-Output \"READY: $PrinterName / $Engine\"; exit 0 }\n$listener = New-Object System.Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $Port)\ntry {\n    $listener.Start()\n    Write-Host \"PackCheck ready: http://127.0.0.1:$Port -> $PrinterName\" -ForegroundColor Green\n    Write-Host 'Keep this window running. Ctrl+C stops the bridge.'\n    while ($true) {\n        $client = $listener.AcceptTcpClient()\n        $stream = $null\n        $origin = 'null'\n        try {\n            $stream = $client.GetStream()\n            $stream.ReadTimeout = 15000\n            $stream.WriteTimeout = 15000\n            $request = Read-HttpRequest $stream\n            $origin = $request.Headers['origin']\n            if ($request.Headers['host'] -ne \"127.0.0.1:$Port\") {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Invalid Host header.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'OPTIONS') {\n                Write-JsonResponse $stream 200 @{ ok=$true } $origin\n                continue\n            }\n            if ($request.Headers['x-packcheck-key'] -cne $BridgeKey) {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Bridge key mismatch. Use index.html and bridge from the same package.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'GET' -and $request.Path -eq '/health') {\n                Assert-Printer\n                Write-JsonResponse $stream 200 @{ ok=$true; ready=$true; protocol=2; printer=$PrinterName } $origin\n                continue\n            }\n            if ($request.Method -ne 'POST' -or $request.Path -ne '/print-pdf') {\n                Write-JsonResponse $stream 404 @{ ok=$false; error='Unknown endpoint.' } $origin\n                continue\n            }\n            if ($request.Headers.ContainsKey('transfer-encoding')) { throw 'Chunked transfer is unsupported. Send a PDF Blob with Content-Length.' }\n            $length = 0\n            if (![int]::TryParse($request.Headers['content-length'], [ref]$length) -or $length -lt 5 -or $length -gt $MaxBytes) {\n                throw 'PDF size must be between 5 bytes and 32 MB.'\n            }\n            if ($request.Headers['content-type'] -notmatch '^application/pdf(?:;|$)') { throw 'Content-Type must be application/pdf.' }\n            $jobId = $request.Headers['x-packcheck-job']\n            if ($jobId -notmatch '^pc2-[a-f0-9]{64}$') { throw 'Invalid job ID.' }\n            $bytes = New-Object byte[] $length\n            $offset = 0\n            while ($offset -lt $length) {\n                $read = $stream.Read($bytes, $offset, $length - $offset)\n                if ($read -le 0) { throw 'Incomplete PDF upload.' }\n                $offset += $read\n            }\n            if ([Text.Encoding]::ASCII.GetString($bytes,0,5) -ne '%PDF-') { throw 'The uploaded file is not a PDF.' }\n            $receiptPath = Join-Path $JobsPath ($jobId + '.json')\n            if (Test-Path -LiteralPath $receiptPath) {\n                $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json\n                if ($receipt.status -eq 'submitted') {\n                    Write-JsonResponse $stream 200 @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$receipt.submittedAt; duplicate=$true } $origin\n                } else {\n                    Write-JsonResponse $stream 409 @{ ok=$false; error=\"Print outcome uncertain for $jobId. Check the 9920 UW queue and paper before retrying. See print-jobs receipt.\" } $origin\n                }\n                continue\n            }\n            Assert-Printer\n            $pdfPath = Join-Path $JobsPath ($jobId + '.pdf')\n            [IO.File]::WriteAllBytes($pdfPath, $bytes)\n            # Save before launching: a crash or timeout must never silently submit twice.\n            @{ status='uncertain'; printer=$PrinterName; jobId=$jobId; createdAt=[DateTime]::UtcNow.ToString('o') } |\n                ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            $arguments = '-silent -print-to \"' + $PrinterName + '\" -print-settings \"fit\" \"' + $pdfPath + '\"'\n            $process = Start-Process -FilePath $Engine -ArgumentList $arguments -WindowStyle Hidden -PassThru\n            if (!$process.WaitForExit(90000)) {\n                throw \"Print process timed out. Check the 9920 UW queue before retrying ($jobId).\"\n            }\n            if ($process.ExitCode -ne 0) {\n                throw \"PDF print engine failed (exit $($process.ExitCode)). Check printer, driver, and queue ($jobId).\"\n            }\n            $submittedAt = [DateTime]::UtcNow.ToString('o')\n            $receipt = @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$submittedAt }\n            $receipt | ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            Write-Host \"SUBMITTED $jobId -> $PrinterName\" -ForegroundColor Cyan\n            Write-JsonResponse $stream 200 $receipt $origin\n        } catch {\n            $message = $_.Exception.Message\n            Write-Host $message -ForegroundColor Red\n            if ($stream) {\n                try { Write-JsonResponse $stream 500 @{ ok=$false; error=$message; printer=$PrinterName } $origin } catch { }\n            }\n        } finally {\n            if ($stream) { $stream.Dispose() }\n            $client.Close()\n        }\n    }\n} finally { $listener.Stop() }\n"], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob(['\uFEFF', "# PackCheck direct print bridge. Runs as the current Windows user, loopback only.\n# Uses the printer's Windows default paper form. Set that to \"TikTok New\" first.\nparam([string]$SumatraPath = '', [switch]$CheckOnly, [int]$Port = 19123)\n$ErrorActionPreference = 'Stop'\n$PrinterName = '9920 UW'\n$BridgeKey = 'ac0f4f02c23cb469c4a7fb8050a1b1b8556d391ae3a0bcdad9b679e0b42c6aef'\n$MaxBytes = 32MB\n$JobsPath = Join-Path $PSScriptRoot 'print-jobs'\nNew-Item -ItemType Directory -Force -Path $JobsPath | Out-Null\nAdd-Type -AssemblyName System.Drawing\n\nfunction Get-PrintEngine {\n    if ($SumatraPath) {\n        if (!(Test-Path -LiteralPath $SumatraPath -PathType Leaf)) { throw 'SumatraPath does not exist.' }\n        return (Resolve-Path -LiteralPath $SumatraPath).Path\n    }\n    $candidates = @(\n        (Join-Path $PSScriptRoot 'tools\\SumatraPDF.exe'),\n        (Join-Path $env:LOCALAPPDATA 'SumatraPDF\\SumatraPDF.exe'),\n        (Join-Path $env:ProgramFiles 'SumatraPDF\\SumatraPDF.exe')\n    )\n    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'SumatraPDF\\SumatraPDF.exe' }\n    foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate } }\n    throw 'SumatraPDF is missing. Run Setup-Print-Engine.ps1 once, then start this bridge again.'\n}\n\nfunction Assert-Printer {\n    $names = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters)\n    if ($names -notcontains $PrinterName) { throw \"Printer '$PrinterName' is not installed for this Windows user.\" }\n}\n\nfunction Write-JsonResponse($Stream, [int]$Status, $Payload, [string]$Origin) {\n    $body = [Text.Encoding]::UTF8.GetBytes(($Payload | ConvertTo-Json -Depth 8 -Compress))\n    $allowedOrigin = if ($Origin -match '^(null|https?://[^\\r\\n]+)$') { $Origin } else { 'null' }\n    $head = \"HTTP/1.1 $Status Response`r`nContent-Type: application/json; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`nCache-Control: no-store`r`nAccess-Control-Allow-Origin: $allowedOrigin`r`nVary: Origin`r`nAccess-Control-Allow-Methods: GET, POST, OPTIONS`r`nAccess-Control-Allow-Headers: Content-Type, X-PackCheck-Key, X-PackCheck-Job`r`nAccess-Control-Allow-Private-Network: true`r`n`r`n\"\n    $headerBytes = [Text.Encoding]::ASCII.GetBytes($head)\n    $Stream.Write($headerBytes, 0, $headerBytes.Length)\n    $Stream.Write($body, 0, $body.Length)\n    $Stream.Flush()\n}\n\nfunction Read-HttpRequest($Stream) {\n    $header = New-Object System.Collections.Generic.List[byte]\n    while ($true) {\n        $value = $Stream.ReadByte()\n        if ($value -lt 0) {\n            if ($header.Count -eq 0) { return $null }\n            throw 'Client disconnected before request headers.'\n        }\n        $header.Add([byte]$value)\n        $n = $header.Count\n        if ($n -gt 16384) { throw 'HTTP headers too large.' }\n        if ($n -ge 4 -and $header[$n-4] -eq 13 -and $header[$n-3] -eq 10 -and $header[$n-2] -eq 13 -and $header[$n-1] -eq 10) { break }\n    }\n    $lines = [Text.Encoding]::ASCII.GetString($header.ToArray()) -split \"`r`n\"\n    $first = $lines[0] -split ' '\n    if ($first.Length -ne 3) { throw 'Invalid HTTP request.' }\n    $headers = @{}\n    foreach ($line in $lines[1..($lines.Length-1)]) {\n        $at = $line.IndexOf(':')\n        if ($at -gt 0) {\n            $name = $line.Substring(0, $at).Trim().ToLowerInvariant()\n            if ($headers.ContainsKey($name)) { throw 'Duplicate HTTP header.' }\n            $headers[$name] = $line.Substring($at+1).Trim()\n        }\n    }\n    return @{ Method = $first[0]; Path = $first[1]; Headers = $headers }\n}\n\nfunction Test-ExistingBridge {\n    try {\n        $health = Invoke-RestMethod -UseBasicParsing -Uri \"http://127.0.0.1:$Port/health\" -Headers @{ 'X-PackCheck-Key'=$BridgeKey } -TimeoutSec 3\n        return ($health.ok -and $health.ready -and $health.protocol -eq 2 -and $health.printer -eq $PrinterName)\n    } catch { return $false }\n}\n\nif (!$CheckOnly -and (Test-ExistingBridge)) {\n    Write-Host \"PackCheck is already running on port $Port -> $PrinterName. Keep the first window open.\" -ForegroundColor Green\n    exit 0\n}\n$Engine = Get-PrintEngine\nAssert-Printer\nif ($CheckOnly) { Write-Output \"READY: $PrinterName / $Engine\"; exit 0 }\n$listener = New-Object System.Net.Sockets.TcpListener([Net.IPAddress]::Loopback, $Port)\ntry {\n    try { $listener.Start() } catch {\n        if (Test-ExistingBridge) {\n            Write-Host \"PackCheck is already running on port $Port -> $PrinterName. Keep the first window open.\" -ForegroundColor Green\n            exit 0\n        }\n        Write-Host \"Cannot start PackCheck on port $Port. Another program or an older bridge may be using it. Close only the old PackCheck bridge window, then start again.\" -ForegroundColor Yellow\n        exit 1\n    }\n    Write-Host \"PackCheck ready: http://127.0.0.1:$Port -> $PrinterName\" -ForegroundColor Green\n    Write-Host 'Keep this window running. Ctrl+C stops the bridge.'\n    while ($true) {\n        $client = $listener.AcceptTcpClient()\n        $stream = $null\n        $origin = 'null'\n        try {\n            # Browsers may preconnect without sending an HTTP request. Do not let\n            # an idle speculative socket block actual health/print requests for 15s.\n            if (!$client.Client.Poll(250000, [Net.Sockets.SelectMode]::SelectRead)) { continue }\n            $stream = $client.GetStream()\n            $stream.ReadTimeout = 15000\n            $stream.WriteTimeout = 15000\n            $request = Read-HttpRequest $stream\n            if (!$request) { continue }\n            $origin = $request.Headers['origin']\n            if ($request.Headers['host'] -ne \"127.0.0.1:$Port\") {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Invalid Host header.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'OPTIONS') {\n                Write-JsonResponse $stream 200 @{ ok=$true } $origin\n                continue\n            }\n            if ($request.Headers['x-packcheck-key'] -cne $BridgeKey) {\n                Write-JsonResponse $stream 403 @{ ok=$false; error='Bridge key mismatch. Use index.html and bridge from the same package.' } $origin\n                continue\n            }\n            if ($request.Method -eq 'GET' -and $request.Path -eq '/health') {\n                Assert-Printer\n                Write-JsonResponse $stream 200 @{ ok=$true; ready=$true; protocol=2; printer=$PrinterName } $origin\n                continue\n            }\n            if ($request.Method -ne 'POST' -or $request.Path -ne '/print-pdf') {\n                Write-JsonResponse $stream 404 @{ ok=$false; error='Unknown endpoint.' } $origin\n                continue\n            }\n            if ($request.Headers.ContainsKey('transfer-encoding')) { throw 'Chunked transfer is unsupported. Send a PDF Blob with Content-Length.' }\n            $length = 0\n            if (![int]::TryParse($request.Headers['content-length'], [ref]$length) -or $length -lt 5 -or $length -gt $MaxBytes) {\n                throw 'PDF size must be between 5 bytes and 32 MB.'\n            }\n            if ($request.Headers['content-type'] -notmatch '^application/pdf(?:;|$)') { throw 'Content-Type must be application/pdf.' }\n            $jobId = $request.Headers['x-packcheck-job']\n            if ($jobId -notmatch '^pc2-[a-f0-9]{64}$') { throw 'Invalid job ID.' }\n            $bytes = New-Object byte[] $length\n            $offset = 0\n            while ($offset -lt $length) {\n                $read = $stream.Read($bytes, $offset, $length - $offset)\n                if ($read -le 0) { throw 'Incomplete PDF upload.' }\n                $offset += $read\n            }\n            if ([Text.Encoding]::ASCII.GetString($bytes,0,5) -ne '%PDF-') { throw 'The uploaded file is not a PDF.' }\n            $receiptPath = Join-Path $JobsPath ($jobId + '.json')\n            if (Test-Path -LiteralPath $receiptPath) {\n                $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json\n                if ($receipt.status -eq 'submitted') {\n                    Write-JsonResponse $stream 200 @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$receipt.submittedAt; duplicate=$true } $origin\n                } else {\n                    Write-JsonResponse $stream 409 @{ ok=$false; error=\"Print outcome uncertain for $jobId. Check the 9920 UW queue and paper before retrying. See print-jobs receipt.\" } $origin\n                }\n                continue\n            }\n            Assert-Printer\n            $pdfPath = Join-Path $JobsPath ($jobId + '.pdf')\n            [IO.File]::WriteAllBytes($pdfPath, $bytes)\n            # Save before launching: a crash or timeout must never silently submit twice.\n            @{ status='uncertain'; printer=$PrinterName; jobId=$jobId; createdAt=[DateTime]::UtcNow.ToString('o') } |\n                ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            $arguments = '-silent -print-to \"' + $PrinterName + '\" -print-settings \"fit\" \"' + $pdfPath + '\"'\n            $process = Start-Process -FilePath $Engine -ArgumentList $arguments -WindowStyle Hidden -PassThru\n            if (!$process.WaitForExit(90000)) {\n                throw \"Print process timed out. Check the 9920 UW queue before retrying ($jobId).\"\n            }\n            if ($process.ExitCode -ne 0) {\n                throw \"PDF print engine failed (exit $($process.ExitCode)). Check printer, driver, and queue ($jobId).\"\n            }\n            $submittedAt = [DateTime]::UtcNow.ToString('o')\n            $receipt = @{ ok=$true; status='submitted'; printer=$PrinterName; jobId=$jobId; submittedAt=$submittedAt }\n            $receipt | ConvertTo-Json | Set-Content -LiteralPath $receiptPath -Encoding UTF8\n            Write-Host \"SUBMITTED $jobId -> $PrinterName\" -ForegroundColor Cyan\n            Write-JsonResponse $stream 200 $receipt $origin\n        } catch {\n            $message = $_.Exception.Message\n            Write-Host $message -ForegroundColor Red\n            if ($stream) {\n                try { Write-JsonResponse $stream 500 @{ ok=$false; error=$message; printer=$PrinterName } $origin } catch { }\n            }\n        } finally {\n            if ($stream) { $stream.Dispose() }\n            $client.Close()\n        }\n    }\n} finally { $listener.Stop() }\n"], { type: 'text/plain;charset=utf-8' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   link.href = url;
@@ -7043,7 +7097,7 @@ function downloadWindowsSilentPrintScript(){
 }
 
 // ฟังก์ชันหลักสำหรับบอทรับออเดอร์ + ปริ้นใบปะหน้าอัตโนมัติ
-async function runAutoPrintBotCycle(roundLabel){
+async function runAutoPrintBotCycle(roundLabel, manual = false){
   if(State.autoBotRunning || State.labelPrintBusy) return;
   State.autoBotRunning = true;
   const cfg = State.autoBotCfg;
@@ -7057,19 +7111,22 @@ async function runAutoPrintBotCycle(roundLabel){
     if(!response.ok || (json.code !== undefined && json.code !== 0) || !Array.isArray(json.data?.orders)){
       throw new Error(json.message || json.error || 'ดึงออเดอร์ไม่สำเร็จ');
     }
-    // An imported packing order alone is not evidence of a print submission.
-    const existing = await getExistingOrderEntries(todayStr());
-    for(const entry of existing){
-      let order;
-      try { order = JSON.parse(entry.value); } catch(e) { continue; }
-      if(order.printSubmission?.status !== 'submitted') continue;
-      const ids = order.originalOrderIds?.length ? order.originalOrderIds : [order.orderId];
-      ids.forEach(id => State.apiPrintedIds.add(String(id)));
-    }
-    const orders = json.data.orders.filter(o => !State.apiPrintedIds.has(String(o.id || o.order_id)));
+    const history = await loadApiPrintHistory();
+    const orders = json.data.orders.filter(o => {
+      const id = String(o.id || o.order_id || '');
+      if(!id || o.status !== 'AWAITING_SHIPMENT') return false;
+      if(State.apiPrintedIds.has(id) || history.knownOrders.has(id)) return false;
+      const packages = labelPackageIds(o);
+      if(packages.length && packages.every(id => history.submittedPackages.has(id))) return false;
+      return true;
+    });
     if(!orders.length){
       cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, status: 'done', msg: 'ไม่มีออเดอร์ใหม่ค้างส่งพิมพ์' });
       toast(`🤖 [บอท ${roundLabel}] ไม่มีออเดอร์ใหม่ค้างส่งพิมพ์`);
+      return;
+    }
+    if(manual && !window.confirm(`พบออเดอร์ใหม่ที่ยังไม่อยู่ในประวัติ ${orders.length} ออเดอร์\n\n${orders.slice(0,10).map(o => String(o.id || o.order_id)).join('\n')}${orders.length > 10 ? '\n…' : ''}\n\nยืนยันรับออเดอร์และส่งพิมพ์เข้า 9920 UW?`)){
+      cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, status: 'cancelled', msg: 'ยกเลิกก่อนรับออเดอร์และส่งพิมพ์' });
       return;
     }
     const groups = {};
