@@ -3074,6 +3074,87 @@ async function refreshVerifyList(){
   prefetchBoxPhotos(); // เบื้องหลัง ไม่ต้องรอ
 }
 
+State.verifyResetRunning = false;
+
+async function resetVerificationForDate(date, resetId, staff){
+  if(!backendReady) throw new Error('ฐานข้อมูลยังไม่พร้อม กรุณาลองใหม่');
+  const prefix = 'order:' + date + ':';
+  const rows = await sListValues(prefix, true, true);
+  const keys = [...new Set(rows.map(row => row.key))];
+  if(keys.some(key => !key.startsWith(prefix))) throw new Error('วันที่ของข้อมูลไม่ตรงกัน จึงยังไม่ล้างผลตรวจ');
+  let cleared = 0;
+  for(let start = 0; start < keys.length; start += 200){
+    const chunk = keys.slice(start, start + 200);
+    const count = await db.runTransaction(async transaction => {
+      const refs = chunk.map(key => db.collection('packcheck').doc(sanitizeDocId(key)));
+      const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+      const now = Date.now();
+      let changed = 0;
+      snapshots.forEach((snapshot,index) => {
+        if(!snapshot.exists) return;
+        const order = JSON.parse(snapshot.data().value);
+        if(!Array.isArray(order.items)) throw new Error('รายการสินค้าไม่ถูกต้อง จึงยังไม่ล้างผลตรวจ');
+        if(!order.verifiedAt && !order.verifiedBy && !order.items.some(item => Number(item.qtyVerified) > 0)) return;
+        // Keep an independent backup of QC counters/identity, without copying
+        // customer details. The backup and reset commit together.
+        const backup = {
+          date, orderId: order.orderId, resetId, resetAt: now, resetBy: staff,
+          verifiedAt: order.verifiedAt || null, verifiedBy: order.verifiedBy || null,
+          items: order.items.map(item => ({ code: item.code, qtyRequired: item.qtyRequired, qtyVerified: item.qtyVerified || 0 }))
+        };
+        const backupKey = 'verify-reset-backup:' + date + ':' + resetId + ':' + order.orderId;
+        transaction.set(db.collection('packcheck').doc(sanitizeDocId(backupKey)), { value: JSON.stringify(backup), updatedAt: now });
+        const next = {
+          ...order, items: order.items.map(item => ({ ...item, qtyVerified: 0 })),
+          verifiedAt: null, verifiedBy: null, updatedAt: now,
+          verificationReset: { id: resetId, at: now, by: staff }
+        };
+        transaction.set(refs[index], { value: JSON.stringify(next), updatedAt: now });
+        changed++;
+      });
+      return changed;
+    });
+    cleared += count;
+  }
+  return cleared;
+}
+
+async function restartVerificationForSelectedDate(){
+  if(State.verifyResetRunning || !State.date) return;
+  const date = State.date;
+  if(!window.confirm(`เริ่มตรวจสอบใหม่ทั้งหมดของวันที่ ${fmtDateTH(date)}?\n\nจะล้างผลตรวจก่อนส่งทุกออเดอร์ของวันที่นี้ รวมรายการที่ซ่อนด้วยช่องค้นหา แล้วให้สแกนตรวจใหม่ทีละออเดอร์\n\nจำนวนที่แพ็ค สินค้า และประวัติพิมพ์จะคงเดิม`)) return;
+  State.verifyResetRunning = true;
+  const button = document.getElementById('verify-reset-all-btn');
+  if(button){ button.disabled = true; button.textContent = 'กำลังล้างผลตรวจ...'; }
+  const input = document.getElementById('verify-scan-input');
+  if(input) input.disabled = true;
+  for(const id of ['verify-date-select','verify-cam-toggle','search-box']){
+    const control = document.getElementById(id);
+    if(control) control.disabled = true;
+  }
+  try{
+    await stopCamera();
+    const resetId = Date.now() + '-' + crypto.randomUUID();
+    const count = await resetVerificationForDate(date, resetId, State.staffName || 'ไม่ระบุชื่อ');
+    State.currentVerifyOrder = null;
+    State.lastVerifyScan = null;
+    State.verifySub = 'list';
+    State.search = '';
+    toast(`ล้างผลตรวจ ${count} ออเดอร์ของวันที่ ${fmtDateTH(date)} แล้ว เริ่มสแกนใบปะหน้าเพื่อตรวจใหม่ทีละออเดอร์ได้เลย`);
+  }catch(error){
+    console.error('Reset verification failed', error);
+    toast('ล้างผลตรวจไม่ครบ กรุณาดูยอดล่าสุดก่อนลองใหม่: ' + error.message);
+  }finally{
+    State.verifyResetRunning = false;
+    await refreshVerifyList();
+    if(State.view === 'verify'){
+      document.getElementById('main').innerHTML = renderVerifyList();
+      wireVerifyList();
+      document.getElementById('verify-scan-input')?.focus();
+    }
+  }
+}
+
 function renderVerifyList(){
   const allVerifyDates = [...new Set([todayStr(), ...State.dates])].sort().reverse();
   const dateOptions = allVerifyDates.map(d => `<option value="${d}" ${d===State.date?'selected':''}>${fmtDateTH(d)}${d===todayStr()?' (วันนี้)':''}</option>`).join('');
@@ -3142,12 +3223,18 @@ function renderVerifyList(){
       <div class="stat"><div class="num" style="color:var(--success)">${verifiedCount}</div><div class="lbl">ตรวจสอบแล้ว</div></div>
       <div class="stat"><div class="num" style="color:var(--danger)">${pendingCount}</div><div class="lbl">รอตรวจสอบ</div></div>
     </div>
+    <div class="toolbar-panel" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <button type="button" class="btn secondary" id="verify-reset-all-btn" style="color:var(--danger);border-color:var(--danger);flex:0 0 auto" ${State.verifyResetRunning || !State.verifyOrders.some(o => o.verifiedAt || o.verifiedBy || o.items?.some(i => Number(i.qtyVerified)>0)) ? 'disabled' : ''}>${State.verifyResetRunning ? 'กำลังล้างผลตรวจ...' : '↻ ตรวจสอบใหม่ทั้งหมด'}</button>
+      <span class="muted" style="font-size:12px">ล้างเฉพาะผลตรวจก่อนส่งทั้งหมดของวันที่เลือก แล้วสแกนตรวจใหม่ทีละออเดอร์</span>
+    </div>
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
     <div id="order-list">${listHtml}</div>
   `;
 }
 
 function wireVerifyList(){
+  const resetButton = document.getElementById('verify-reset-all-btn');
+  if(resetButton) resetButton.onclick = restartVerificationForSelectedDate;
   const verifyScanInput = document.getElementById('verify-scan-input');
   if(verifyScanInput){
     verifyScanInput.onkeydown = (e) => {
@@ -3259,6 +3346,7 @@ function showVerifyPopup(order, kind){
 }
 
 async function handleVerifyLookupScan(raw){
+  if(State.verifyResetRunning) return;
   const code = raw.trim();
   if(!code) return;
   lastVerifyScanAt = Date.now();
@@ -3432,6 +3520,7 @@ function wireVerifyDetail(){
 }
 
 async function handleVerifyScan(code){
+  if(State.verifyResetRunning) return;
   const o = State.currentVerifyOrder;
   const idx = o.items.findIndex(it => it.code.toLowerCase() === code.toLowerCase());
   if(idx === -1){
