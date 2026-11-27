@@ -5841,6 +5841,21 @@ State.apiOrdersAll = [];
 State.apiOrdersFiltered = [];
 State.apiOrdersPicked = new Set();
 State.apiFilterOpen = false;
+State.apiPrintTab = 'new'; // 'new' (ออเดอร์ใหม่/รอพิมพ์) | 'printed' (พิมพ์แล้ว)
+State.apiPrintedIds = new Set();
+try{
+  const savedPrinted = JSON.parse(localStorage.getItem('packcheck_api_printed_ids') || '[]');
+  if(Array.isArray(savedPrinted)) savedPrinted.forEach(id => State.apiPrintedIds.add(String(id)));
+}catch(e){}
+
+function markApiOrdersAsPrinted(orderIds){
+  (orderIds || []).forEach(id => State.apiPrintedIds.add(String(id)));
+  try{
+    const arr = [...State.apiPrintedIds].slice(-2000);
+    localStorage.setItem('packcheck_api_printed_ids', JSON.stringify(arr));
+  }catch(e){}
+}
+
 State.apiFilterState = {
   status: 'ALL_UNSHIPPED',
   channel: '',
@@ -5886,6 +5901,16 @@ async function fetchApiOrdersForPrintView(autoSyncToQueue = false){
       return;
     }
     State.apiOrdersAll = json.data?.orders || [];
+    try{
+      const existingToday = await getExistingOrderEntries(todayStr());
+      existingToday.forEach(en => {
+        try{
+          const doc = JSON.parse(en.value);
+          const origs = (Array.isArray(doc.originalOrderIds) && doc.originalOrderIds.length) ? doc.originalOrderIds : [doc.orderId];
+          origs.forEach(id => State.apiPrintedIds.add(String(id)));
+        }catch(e){}
+      });
+    }catch(e){}
     applyApiPrintFilters(false);
     if(autoSyncToQueue && State.apiOrdersAll.length > 0){
       await upsertApiOrdersToPackCheck(State.apiOrdersAll, true);
@@ -5907,6 +5932,11 @@ function applyApiPrintFilters(shouldRender = true){
   const enDT = parseCfgDT(f.end);
 
   State.apiOrdersFiltered = (State.apiOrdersAll || []).filter(ao => {
+    const oid = String(ao.id || ao.order_id);
+    const isPrinted = State.apiPrintedIds.has(oid);
+    if(State.apiPrintTab === 'new' && isPrinted) return false;
+    if(State.apiPrintTab === 'printed' && !isPrinted) return false;
+
     const createMs = (ao.create_time || 0) * 1000;
     if(stDT && createMs < stDT.getTime()) return false;
     if(enDT && createMs > enDT.getTime() + 59999) return false;
@@ -5955,6 +5985,8 @@ function renderApiPrintDOM(){
   const list = State.apiOrdersFiltered;
   const unshippedCount = State.apiOrdersAll.filter(o => o.status === 'AWAITING_SHIPMENT').length;
   const collectionCount = State.apiOrdersAll.filter(o => o.status === 'AWAITING_COLLECTION').length;
+  const newTabCount = State.apiOrdersAll.filter(o => !State.apiPrintedIds.has(String(o.id || o.order_id))).length;
+  const printedTabCount = State.apiOrdersAll.filter(o => State.apiPrintedIds.has(String(o.id || o.order_id))).length;
   const hasActiveFilter = Boolean(f.channel || f.start || f.end || f.creator || f.sku || (f.minQty && f.minQty > 1));
 
   const filterPanelHtml = State.apiFilterOpen ? `
@@ -6030,7 +6062,7 @@ function renderApiPrintDOM(){
         </div>
       </label>
     `;
-  }).join('') : `<div class="empty"><div class="big">📭</div>ไม่มีรายการออเดอร์ในหน้านี้<br><span class="muted" style="font-size:13px">กดปุ่ม "🔄 รีเฟรชออเดอร์ล่าสุด" ด้านบนเพื่อดึงข้อมูลใหม่จาก TikTok</span></div>`;
+  }).join('') : `<div class="empty"><div class="big">${State.apiPrintTab==='new'?'🎉':'📭'}</div>${State.apiPrintTab==='new'?'ไม่มีออเดอร์ใหม่ค้างพิมพ์แล้ว!':'ยังไม่มีรายการออเดอร์ในแถบพิมพ์แล้ว'}<br><span class="muted" style="font-size:13px">${State.apiPrintTab==='new'?'ออเดอร์ที่พิมพ์ไปแล้วจะย้ายไปอยู่ในแถบ "✅ พิมพ์แล้ว" ด้านบน':'กดปุ่ม "🔄 รีเฟรชออเดอร์ล่าสุด" ด้านบนเพื่อดึงข้อมูลใหม่จาก TikTok'}</span></div>`;
 
   main.innerHTML = `
     <div class="hero-banner" style="background:linear-gradient(135deg, #00997a 0%, #007a60 100%)">
@@ -6049,6 +6081,15 @@ function renderApiPrintDOM(){
 
     ${filterPanelHtml}
 
+    <div style="display:flex;gap:8px;margin-bottom:12px;background:var(--surface);padding:6px;border-radius:18px;border:1px solid var(--border)">
+      <button type="button" id="ap-subtab-new" style="flex:1;padding:10px 14px;border-radius:14px;border:none;font-family:var(--disp);font-weight:800;font-size:13.5px;cursor:pointer;transition:all .15s;${State.apiPrintTab==='new'?'background:#00997a;color:#fff;box-shadow:0 4px 12px rgba(0,153,122,0.28)':'background:transparent;color:var(--muted)'}">
+        🆕 ออเดอร์ใหม่ / รอพิมพ์ (${newTabCount})
+      </button>
+      <button type="button" id="ap-subtab-printed" style="flex:1;padding:10px 14px;border-radius:14px;border:none;font-family:var(--disp);font-weight:800;font-size:13.5px;cursor:pointer;transition:all .15s;${State.apiPrintTab==='printed'?'background:var(--accent);color:#fff;box-shadow:0 4px 12px rgba(86,54,211,0.28)':'background:transparent;color:var(--muted)'}">
+        ✅ พิมพ์แล้ว (${printedTabCount})
+      </button>
+    </div>
+
     <div class="card" style="position:sticky;top:68px;z-index:20;padding:12px 14px;background:#ffffff;border:1.5px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -6061,7 +6102,7 @@ function renderApiPrintDOM(){
 
 
       <div class="row" style="margin-top:8px">
-        <button class="btn" id="ap-batch-print-btn" style="background:#00997a;flex:2">🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)</button>
+        <button class="btn" id="ap-batch-print-btn" style="background:${State.apiPrintTab==='new'?'#00997a':'var(--accent)'};flex:2">${State.apiPrintTab==='new'?'🚚 เตรียมการจัดส่ง + พิมพ์ใบปะหน้า (รวมไฟล์เดียว)':'🖨️ พิมพ์ใบปะหน้าซ้ำ (รวมไฟล์เดียว)'}</button>
         <button class="btn secondary" id="ap-picklist-btn" style="flex:1">📋 ใบสรุปหยิบของ</button>
       </div>
     </div>
@@ -6073,6 +6114,16 @@ function renderApiPrintDOM(){
 }
 
 function wireApiPrintDOM(){
+  document.getElementById('ap-subtab-new').onclick = () => {
+    State.apiPrintTab = 'new';
+    State.apiOrdersPicked.clear();
+    applyApiPrintFilters(true);
+  };
+  document.getElementById('ap-subtab-printed').onclick = () => {
+    State.apiPrintTab = 'printed';
+    State.apiOrdersPicked.clear();
+    applyApiPrintFilters(true);
+  };
   document.getElementById('ap-refresh-top').onclick = () => fetchApiOrdersForPrintView(false);
   document.getElementById('ap-toggle-filter').onclick = () => {
     State.apiFilterOpen = !State.apiFilterOpen;
@@ -6614,6 +6665,9 @@ async function executeBatchShipAndPrint(selected, shouldCombine = false, confirm
     const packDate = todayStr();
     State.date = packDate;
     await upsertApiOrdersToPackCheck(selected, false, false, packDate, true);
+    markApiOrdersAsPrinted(selected.map(ao => String(ao.id || ao.order_id)));
+    State.apiOrdersPicked.clear();
+    applyApiPrintFilters(false);
 
     if(!docUrls.length){
       toast('❌ พิมพ์ไม่สำเร็จ: ' + (firstErr || 'TikTok ยังไม่ออกไฟล์ใบปะหน้าให้ (ลองกดใหม่อีกครั้ง)'));
