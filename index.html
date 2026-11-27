@@ -822,6 +822,10 @@
       <span class="tab-ic"><svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></span>
       <span class="tab-label">ปริ้นใบปะหน้า</span>
     </button>
+    <button id="tab-autobot">
+      <span class="tab-ic"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg></span>
+      <span class="tab-label">บอทปริ้นออโต้</span>
+    </button>
     <button id="tab-verify">
       <span class="tab-ic"><svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
       <span class="tab-label">ตรวจก่อนส่ง</span>
@@ -6715,5 +6719,455 @@ async function executeBatchShipAndPrint(selected, shouldCombine = false, confirm
 }
 
 </script>
+
+<script>
+// --- 9. ระบบบอทรับออเดอร์ + ปริ้นใบปะหน้าอัตโนมัติตามเวลาที่กำหนด (Auto-Print Bot Scheduler) ---
+const AUTOBOT_CFG_KEY = 'config:autobot';
+State.autoBotCfg = {
+  enabled: false,
+  autoMergeSameAddr: true,
+  autoPrintPopup: true,
+  silentPrintUrl: 'http://127.0.0.1:9123/print-pdf', // พอร์ตสำหรับโปรแกรมพิมพ์ตรงออกเครื่องปริ้นที่ร้าน (ถ้าเปิดใช้)
+  useSilentPrintServer: false,
+  schedules: ['09:00', '12:00', '15:00', '17:30'],
+  lastRunMap: {}, // { '2026-11-27_09:00': { ts, count, status } }
+  logs: [] // [{ ts, round, count, msg }]
+};
+State.autoBotRunning = false;
+
+async function loadAutoBotConfig(){
+  try{
+    const raw = await sGet(AUTOBOT_CFG_KEY, true);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      State.autoBotCfg = Object.assign({}, State.autoBotCfg, parsed);
+      if(!Array.isArray(State.autoBotCfg.schedules)) State.autoBotCfg.schedules = ['09:00', '15:00'];
+      if(!State.autoBotCfg.lastRunMap) State.autoBotCfg.lastRunMap = {};
+      if(!Array.isArray(State.autoBotCfg.logs)) State.autoBotCfg.logs = [];
+    }
+  }catch(e){}
+}
+
+async function saveAutoBotConfig(){
+  try{
+    if(State.autoBotCfg.logs.length > 30) State.autoBotCfg.logs = State.autoBotCfg.logs.slice(0, 30);
+    await sSetWithRetry(AUTOBOT_CFG_KEY, JSON.stringify(State.autoBotCfg), true);
+  }catch(e){}
+}
+
+const _prevSetTabBot = setTab;
+setTab = function(tab){
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+  if(tab === 'autobot'){
+    State.view = 'autobot';
+    document.getElementById('tab-autobot')?.classList.add('active');
+    stopCamera();
+    renderAutoBotView();
+    return;
+  }
+  _prevSetTabBot(tab);
+};
+document.getElementById('tab-autobot').onclick = () => setTab('autobot');
+
+async function renderAutoBotView(){
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="empty">⏳ กำลังโหลดการตั้งค่าบอทปริ้นอัตโนมัติ...</div>';
+  await loadAutoBotConfig();
+  renderAutoBotDOM();
+}
+
+function renderAutoBotDOM(){
+  const main = document.getElementById('main');
+  const cfg = State.autoBotCfg;
+  const sortedTimes = [...cfg.schedules].sort();
+  const today = todayStr();
+
+  const timesHtml = sortedTimes.length ? sortedTimes.map((t, idx) => {
+    const runKey = `${today}_${t}`;
+    const ranInfo = cfg.lastRunMap[runKey];
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;background:#ffffff;border:1.5px solid ${ranInfo?'#a7f3d0':'var(--border)'};border-radius:16px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:38px;height:38px;border-radius:12px;background:${ranInfo?'var(--success-dim)':'var(--accent-soft)'};color:${ranInfo?'#047857':'var(--accent)'};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px">
+            รอบ ${idx + 1}
+          </div>
+          <div>
+            <div class="mono" style="font-size:18px;font-weight:800;color:var(--text)">🕒 ${esc(t)} น.</div>
+            <div style="font-size:12px;color:${ranInfo?'#047857':'var(--muted)'};font-weight:600">
+              ${ranInfo ? `✅ ทำงานแล้ววันนี้ (${ranInfo.count} ออเดอร์)` : '⏳ รอถึงเวลาทำงานอัตโนมัติ'}
+            </div>
+          </div>
+        </div>
+        <button type="button" data-bot-del-time="${esc(t)}" style="background:var(--danger-dim);color:var(--danger);border:none;border-radius:12px;padding:8px 12px;font-weight:700;font-size:12.5px;cursor:pointer">ลบ</button>
+      </div>
+    `;
+  }).join('') : '<div class="empty" style="padding:20px">ยังไม่ได้ตั้งรอบเวลา — เพิ่มเวลาที่ต้องการให้บอทปริ้นด้านล่าง</div>';
+
+  const logsHtml = cfg.logs.length ? cfg.logs.map(lg => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+      <div>
+        <span style="font-weight:700;color:var(--text)">[รอบ ${esc(lg.round)}]</span> ${esc(lg.msg)}
+      </div>
+      <div class="mono muted" style="font-size:11px;flex-shrink:0">${new Date(lg.ts).toLocaleString('th-TH',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+    </div>
+  `).join('') : '<div class="muted" style="font-size:13px;padding:8px 0">ยังไม่มีประวัติการทำงานของบอท</div>';
+
+  main.innerHTML = `
+    <div class="hero-banner" style="background:${cfg.enabled ? 'linear-gradient(135deg, #5636d3 0%, #3a1fa8 100%)' : 'linear-gradient(135deg, #4b5563 0%, #374151 100%)'}">
+      <div class="hero-title">🤖 บอทรับออเดอร์ &amp; ปริ้นอัตโนมัติ</div>
+      <div class="hero-sub">เปิดหน้าเว็บนี้ทิ้งไว้ที่เครื่องคอมพิวเตอร์ร้าน ระบบจะดึงออเดอร์ใหม่ รวมพัสดุที่อยู่เดียวกัน และสั่งปริ้นใบปะหน้าตามเวลาที่ตั้งไว้เอง</div>
+      <div class="hero-cta-row">
+        <button class="hero-cta-btn" id="bot-toggle-main" style="background:${cfg.enabled ? '#10b981' : '#ff6b00'}">
+          ${cfg.enabled ? '🟢 สถานะ: เปิดใช้งานบอทอยู่ (กดเพื่อปิด)' : '⚪ สถานะ: ปิดอยู่ (กดเพื่อเปิดใช้งาน)'}
+        </button>
+        <div class="hero-stat-pill">${sortedTimes.length} รอบ/วัน</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:800;font-size:15px;margin-bottom:10px;color:var(--text)">⏰ ตั้งเวลาในการปริ้นอัตโนมัติ (เพิ่มได้หลายรอบ)</div>
+      <div class="row" style="align-items:flex-end;margin-bottom:12px">
+        <div style="flex:2">
+          <label>เลือกเวลาที่ต้องการให้ปริ้น (ชั่วโมง : นาที)</label>
+          <input type="time" id="bot-new-time" value="10:00" style="margin-bottom:0;font-size:16px;font-weight:700">
+        </div>
+        <button type="button" class="btn" id="bot-add-time-btn" style="flex:1;min-height:46px">+ เพิ่มรอบเวลา</button>
+      </div>
+      <div id="bot-times-list">${timesHtml}</div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:800;font-size:15px;margin-bottom:10px;color:var(--text)">⚙️ เงื่อนไขการทำงานของบอท</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;color:var(--text);margin-bottom:10px">
+        <input type="checkbox" id="bot-opt-merge" ${cfg.autoMergeSameAddr ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)">
+        รวมออเดอร์ที่อยู่เดียวกันเป็นกล่องเดียวให้อัตโนมัติก่อนปริ้น
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;color:var(--text);margin-bottom:10px">
+        <input type="checkbox" id="bot-opt-popup" ${cfg.autoPrintPopup ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)">
+        เปิดไฟล์ PDF ใบปะหน้ารวมไฟล์เดียวขึ้นมาอัตโนมัติเมื่อถึงรอบ
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;color:var(--text);margin-bottom:8px">
+        <input type="checkbox" id="bot-opt-silent" ${cfg.useSilentPrintServer ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)">
+        ส่งพิมพ์ตรงเข้าเครื่องปริ้นสติกเกอร์ทันทีแบบไม่เด้งหน้าต่าง (ผ่านตัวช่วยพิมพ์บน PC ร้าน)
+      </label>
+      ${cfg.useSilentPrintServer ? `
+        <div style="margin-top:8px;padding:12px;background:#f8f6fe;border-radius:14px;border:1px solid var(--border)">
+          <label>URL ตัวช่วยพิมพ์ตรงบนเครื่องคอมที่ร้าน (Local Print Bridge)</label>
+          <input type="text" id="bot-silent-url" value="${esc(cfg.silentPrintUrl)}" style="margin-bottom:8px;font-family:var(--mono);font-size:13px">
+          <button type="button" class="btn secondary" id="bot-dl-bridge-btn" style="font-size:12.5px;min-height:38px">⬇️ ดาวน์โหลดสคริปต์ตัวช่วยพิมพ์ตรงสำหรับ Windows PC (.ps1)</button>
+        </div>
+      ` : ''}
+      <div style="margin-top:12px">
+        <button type="button" class="btn" id="bot-run-now-btn" style="background:#00997a" ${State.autoBotRunning ? 'disabled' : ''}>
+          ${State.autoBotRunning ? '⏳ บอทกำลังทำงาน...' : '🚀 ทดสอบรันบอทรับออเดอร์ + ปริ้นทันที (1 รอบ)'}
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800;font-size:15px">📜 ประวัติการทำงานอัตโนมัติ</div>
+        <button type="button" id="bot-clear-logs" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">ล้างประวัติ</button>
+      </div>
+      ${logsHtml}
+    </div>
+  `;
+
+  wireAutoBotDOM();
+}
+
+function wireAutoBotDOM(){
+  const cfg = State.autoBotCfg;
+
+  document.getElementById('bot-toggle-main').onclick = async () => {
+    cfg.enabled = !cfg.enabled;
+    await saveAutoBotConfig();
+    toast(cfg.enabled ? '🟢 เปิดใช้งานบอทปริ้นอัตโนมัติแล้ว' : '⚪ ปิดใช้งานบอทปริ้นอัตโนมัติแล้ว');
+    renderAutoBotDOM();
+  };
+
+  document.getElementById('bot-add-time-btn').onclick = async () => {
+    const val = document.getElementById('bot-new-time').value;
+    if(!val){ toast('กรุณาเลือกเวลา'); return; }
+    if(!cfg.schedules.includes(val)){
+      cfg.schedules.push(val);
+      cfg.schedules.sort();
+      await saveAutoBotConfig();
+      toast(`✅ เพิ่มรอบเวลา ${val} น. เรียบร้อย`);
+      renderAutoBotDOM();
+    } else {
+      toast('มีรอบเวลานี้อยู่แล้ว');
+    }
+  };
+
+  document.querySelectorAll('[data-bot-del-time]').forEach(btn => {
+    btn.onclick = async () => {
+      const t = btn.dataset.botDelTime;
+      cfg.schedules = cfg.schedules.filter(x => x !== t);
+      await saveAutoBotConfig();
+      toast(`🗑 ลบรอบเวลา ${t} น. แล้ว`);
+      renderAutoBotDOM();
+    };
+  });
+
+  document.getElementById('bot-opt-merge').onchange = async (e) => {
+    cfg.autoMergeSameAddr = e.target.checked;
+    await saveAutoBotConfig();
+  };
+  document.getElementById('bot-opt-popup').onchange = async (e) => {
+    cfg.autoPrintPopup = e.target.checked;
+    await saveAutoBotConfig();
+  };
+  document.getElementById('bot-opt-silent').onchange = async (e) => {
+    cfg.useSilentPrintServer = e.target.checked;
+    await saveAutoBotConfig();
+    renderAutoBotDOM();
+  };
+  const silentUrlInp = document.getElementById('bot-silent-url');
+  if(silentUrlInp){
+    silentUrlInp.onchange = async (e) => {
+      cfg.silentPrintUrl = e.target.value.trim() || 'http://127.0.0.1:9123/print-pdf';
+      await saveAutoBotConfig();
+    };
+  }
+  const dlBridgeBtn = document.getElementById('bot-dl-bridge-btn');
+  if(dlBridgeBtn){
+    dlBridgeBtn.onclick = downloadWindowsSilentPrintScript;
+  }
+
+  document.getElementById('bot-clear-logs').onclick = async () => {
+    cfg.logs = [];
+    await saveAutoBotConfig();
+    renderAutoBotDOM();
+  };
+
+  document.getElementById('bot-run-now-btn').onclick = () => runAutoPrintBotCycle('รันทดสอบด้วยตนเอง');
+}
+
+function downloadWindowsSilentPrintScript(){
+  const psScript = `# PackCheck Local Silent Print Bridge for Windows (100x150mm Thermal Printer)
+# วิธีใช้: คลิกขวาที่ไฟล์นี้ -> Run with PowerShell (เปิดทิ้งไว้ที่เครื่องคอมพิวเตอร์ร้าน)
+$listener = New-Object System.Net.HttpListener
+$listener.Prefixes.Add("http://127.0.0.1:9123/")
+$listener.Start()
+Write-Host "PackCheck Silent Print Bridge Ready on http://127.0.0.1:9123/" -ForegroundColor Green
+while ($listener.IsListening) {
+    $ctx = $listener.GetContext()
+    $req = $ctx.Request
+    $res = $ctx.Response
+    $res.Headers.Add("Access-Control-Allow-Origin", "*")
+    $res.Headers.Add("Access-Control-Allow-Methods", "POST, OPTIONS")
+    $res.Headers.Add("Access-Control-Allow-Headers", "Content-Type")
+    if ($req.HttpMethod -eq "OPTIONS") { $res.StatusCode = 200; $res.Close(); continue }
+    if ($req.HttpMethod -eq "POST" -and $req.Url.AbsolutePath -eq "/print-pdf") {
+        $tmpPdf = [System.IO.Path]::Combine($env:TEMP, "packcheck_label_" + [DateTime]::Now.Ticks + ".pdf")
+        $fs = [System.IO.File]::Create($tmpPdf)
+        $req.InputStream.CopyTo($fs)
+        $fs.Close()
+        Write-Host "Printing label: $tmpPdf" -ForegroundColor Cyan
+        Start-Process -FilePath $tmpPdf -Verb Print -WindowStyle Hidden
+        $buf = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true}')
+        $res.OutputStream.Write($buf, 0, $buf.Length)
+    }
+    $res.Close()
+}
+`;
+  const blob = new Blob([psScript], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'PackCheck_AutoPrint_Bridge.ps1';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  toast('⬇️ ดาวน์โหลดไฟล์ตัวช่วยพิมพ์ตรงเรียบร้อย!');
+}
+
+// ฟังก์ชันหลักสำหรับบอทรับออเดอร์ + ปริ้นใบปะหน้าอัตโนมัติ
+async function runAutoPrintBotCycle(roundLabel){
+  if(State.autoBotRunning) return;
+  State.autoBotRunning = true;
+  if(State.view === 'autobot') renderAutoBotDOM();
+
+  const cfg = State.autoBotCfg;
+  try{
+    toast(`🤖 [บอท ${roundLabel}] กำลังตรวจสอบออเดอร์ใหม่จาก TikTok Shop...`);
+    const res = await fetch(`${TIKTOK_WORKER_URL}/api/orders?status=ALL_UNSHIPPED`);
+    const json = await res.json();
+    const allOrders = json.data?.orders || [];
+
+    // โหลดรายการที่เคยพิมพ์ไปแล้วของวันนี้จาก Firestore เพื่อกันพิมพ์ซ้ำข้ามเครื่อง
+    const today = todayStr();
+    try{
+      const existingToday = await getExistingOrderEntries(today);
+      existingToday.forEach(en => {
+        try{
+          const doc = JSON.parse(en.value);
+          const origs = (Array.isArray(doc.originalOrderIds) && doc.originalOrderIds.length) ? doc.originalOrderIds : [doc.orderId];
+          origs.forEach(id => State.apiPrintedIds.add(String(id)));
+        }catch(e){}
+      });
+    }catch(e){}
+
+    // คัดเฉพาะออเดอร์ใหม่ที่ยังไม่เคยพิมพ์
+    const newOrders = allOrders.filter(ao => !State.apiPrintedIds.has(String(ao.id || ao.order_id)));
+
+    if(newOrders.length === 0){
+      cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, msg: 'ไม่มีออเดอร์ใหม่ค้างพิมพ์' });
+      await saveAutoBotConfig();
+      toast(`🤖 [บอท ${roundLabel}] ไม่มีออเดอร์ใหม่ค้างพิมพ์`);
+      State.autoBotRunning = false;
+      if(State.view === 'autobot') renderAutoBotDOM();
+      return;
+    }
+
+    // จัดกลุ่มรวมพัสดุที่อยู่เดียวกันอัตโนมัติ (ถ้าเปิดใช้งาน)
+    const { byKey } = buildSameAddressGroups(newOrders);
+    const confirmedGroupMap = {};
+    if(cfg.autoMergeSameAddr){
+      Object.entries(byKey).forEach(([gKey, grp]) => {
+        if(grp.length >= 2){
+          grp.forEach(ao => { confirmedGroupMap[String(ao.id || ao.order_id)] = gKey; });
+        }
+      });
+    }
+
+    // ยิงจัดส่ง + ดึงใบปะหน้า PDF
+    const seenPkg = new Set();
+    const packages = [];
+    newOrders.forEach(ao => {
+      const pkgId = ao.packages?.[0]?.id || ao.package_list?.[0]?.package_id || '';
+      if(pkgId && !seenPkg.has(pkgId)){
+        seenPkg.add(pkgId);
+        packages.push({
+          order_id: String(ao.id || ao.order_id),
+          package_id: pkgId,
+          need_ship: ao.status === 'AWAITING_SHIPMENT'
+        });
+      }
+    });
+
+    const CHUNK_SIZE = 10;
+    const allResults = [];
+    for(let i = 0; i < packages.length; i += CHUNK_SIZE){
+      const chunk = packages.slice(i, i + CHUNK_SIZE);
+      const r1 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packages: chunk })
+      });
+      const j1 = await r1.json();
+      if(Array.isArray(j1.results)) allResults.push(...j1.results);
+    }
+
+    // รอ 2 วิ ดึงซ้ำสำหรับใบที่ PDF เพิ่งสร้าง
+    const missingPkgs = allResults.filter(r => !r.doc_url && r.package_id).map(r => ({
+      order_id: r.order_id, package_id: r.package_id, need_ship: false
+    }));
+    if(missingPkgs.length > 0){
+      await sleep(2000);
+      for(let i = 0; i < missingPkgs.length; i += CHUNK_SIZE){
+        const chunk = missingPkgs.slice(i, i + CHUNK_SIZE);
+        const r2 = await fetch(`${TIKTOK_WORKER_URL}/api/batch-ship-and-label`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packages: chunk })
+        });
+        const j2 = await r2.json();
+        if(Array.isArray(j2.results)){
+          j2.results.forEach(item => {
+            const idx = allResults.findIndex(x => x.package_id === item.package_id);
+            if(idx >= 0 && item.doc_url) allResults[idx] = item;
+          });
+        }
+      }
+    }
+
+    const trkByOrder = {};
+    allResults.forEach(r => { if(r.order_id && r.tracking_number) trkByOrder[r.order_id] = r.tracking_number; });
+    newOrders.forEach(ao => {
+      const oid = String(ao.id || ao.order_id);
+      ao.status = 'AWAITING_COLLECTION';
+      if(trkByOrder[oid]) ao.tracking_number = trkByOrder[oid];
+      ao._forceGroupKey = (cfg.autoMergeSameAddr && confirmedGroupMap[oid]) ? confirmedGroupMap[oid] : ('SINGLE:' + oid);
+    });
+
+    // ส่งเข้าหน้า "สแกนแพ็ค" ของวันนี้ + มาร์คว่าพิมพ์แล้ว
+    State.date = today;
+    await upsertApiOrdersToPackCheck(newOrders, true, false, today, true);
+    markApiOrdersAsPrinted(newOrders.map(ao => String(ao.id || ao.order_id)));
+
+    const docUrls = [...new Set(allResults.map(r => r.doc_url).filter(Boolean))];
+    if(docUrls.length > 0 && typeof PDFLib !== 'undefined'){
+      const mergedPdf = await PDFLib.PDFDocument.create();
+      for(const u of docUrls){
+        try{
+          const pdfResp = await fetch(`${TIKTOK_WORKER_URL}/api/proxy-pdf?url=${encodeURIComponent(u)}`);
+          if(!pdfResp.ok) continue;
+          const pdfBytes = await pdfResp.arrayBuffer();
+          const donorPdf = await PDFLib.PDFDocument.load(pdfBytes);
+          const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+          copiedPages.forEach(p => mergedPdf.addPage(p));
+        }catch(e){}
+      }
+      const mergedBytes = await mergedPdf.save();
+      const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+
+      // 1) ถ้าเปิดใช้ Silent Print Server บนเครื่องร้าน ให้ส่งไฟล์ PDF ไปพิมพ์ออกเครื่องปริ้นตรงๆ!
+      if(cfg.useSilentPrintServer && cfg.silentPrintUrl){
+        try{
+          await fetch(cfg.silentPrintUrl, { method: 'POST', body: blob });
+        }catch(e){ console.warn('Silent print bridge unreachable', e); }
+      }
+      // 2) เปิดหน้าต่าง PDF อัตโนมัติ (ถ้าเปิดไว้)
+      if(cfg.autoPrintPopup){
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+      }
+    }
+
+    cfg.logs.unshift({
+      ts: Date.now(),
+      round: roundLabel,
+      count: newOrders.length,
+      msg: `รับออเดอร์และพิมพ์ใบปะหน้าสำเร็จ ${newOrders.length} ออเดอร์ (${docUrls.length} ใบปะหน้า)`
+    });
+    await saveAutoBotConfig();
+    toast(`✅ [บอท ${roundLabel}] พิมพ์ใบปะหน้า ${newOrders.length} ออเดอร์ และส่งเข้าหน้าแพ็คแล้ว!`);
+  }catch(err){
+    cfg.logs.unshift({ ts: Date.now(), round: roundLabel, count: 0, msg: '❌ ผิดพลาด: ' + err.message });
+    await saveAutoBotConfig();
+    toast('❌ บอททำงานผิดพลาด: ' + err.message);
+  }finally{
+    State.autoBotRunning = false;
+    if(State.view === 'autobot') renderAutoBotDOM();
+    if(State.view === 'api-print') applyApiPrintFilters(true);
+  }
+}
+
+// ตัวจับเวลาเบื้องหลัง (เช็คทุก 15 วินาที)
+setInterval(async () => {
+  if(!State.autoBotCfg || !State.autoBotCfg.enabled || State.autoBotRunning) return;
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const hhmm = `${p(now.getHours())}:${p(now.getMinutes())}`;
+  const today = todayStr();
+  const runKey = `${today}_${hhmm}`;
+
+  if(State.autoBotCfg.schedules.includes(hhmm) && !State.autoBotCfg.lastRunMap[runKey]){
+    // บันทึกทันทีว่ารอบนี้เริ่มรันแล้ว เพื่อไม่ให้ยิงซ้ำในนาทีเดียวกัน
+    State.autoBotCfg.lastRunMap[runKey] = { ts: Date.now(), count: 0, status: 'running' };
+    await saveAutoBotConfig();
+    await runAutoPrintBotCycle(hhmm);
+    // อัปเดตจำนวนออเดอร์ล่าสุดลงใน lastRunMap
+    const latestLog = State.autoBotCfg.logs[0];
+    State.autoBotCfg.lastRunMap[runKey] = { ts: Date.now(), count: latestLog ? latestLog.count : 0, status: 'done' };
+    await saveAutoBotConfig();
+  }
+}, 15000);
+
+// โหลดการตั้งค่าบอททันทีตอนเปิดเว็บ
+loadAutoBotConfig();
+</script>
+
 </body>
 </html>
