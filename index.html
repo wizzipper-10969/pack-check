@@ -760,6 +760,50 @@
     .label .lcode{font-size:6vh;margin:0;}
   }
 </style>
+<style id="packcheck-date-picker">
+.pc-date-native{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;border:0!important;clip-path:inset(50%);overflow:hidden;pointer-events:none}
+.pc-date-trigger{display:flex;align-items:center;gap:10px;width:100%;min-height:43px;padding:10px 14px;border:1px solid var(--border,#e5def5);border-radius:15px;background:var(--card,#fff);color:var(--ink,#191526);font:inherit;font-weight:600;text-align:left;cursor:pointer;transition:border-color .18s,box-shadow .18s}
+.pc-date-trigger svg{width:17px;height:17px;flex-shrink:0;color:var(--accent,#6845ed)}
+.pc-date-trigger .pc-date-value{flex:1}.pc-date-trigger .pc-date-chevron{width:15px;transition:transform .18s}.pc-date-trigger[aria-expanded=true] .pc-date-chevron{transform:rotate(180deg)}
+.pc-date-trigger:hover,.pc-date-trigger[aria-expanded=true]{border-color:var(--accent,#6845ed);box-shadow:0 0 0 3px #754df012}.pc-date-trigger:focus-visible,.pc-date-pop button:focus-visible{outline:2px solid var(--accent,#6845ed);outline-offset:3px}.pc-date-trigger:disabled{opacity:.5;cursor:not-allowed}
+.pc-date-pop{position:fixed;z-index:10000;width:328px;max-width:calc(100vw - 20px);padding:15px;border:1px solid #e8e1f6;border-radius:20px;background:#fff;color:#211b32;box-shadow:0 16px 48px #25134724;font-family:inherit;font-size:13px;animation:pc-date-in .18s ease-out;box-sizing:border-box}
+.pc-date-head{display:flex;align-items:center;gap:7px;margin-bottom:14px}.pc-date-title{flex:1;text-align:center;font-weight:700;font-size:15px}.pc-date-pop button{font-family:inherit;cursor:pointer}.pc-date-nav,.pc-date-today{border:1px solid #eee8f6;background:#faf8ff;color:#633ee0;border-radius:10px;min-width:30px;height:30px}.pc-date-today{padding:0 8px;font-size:11px}
+.pc-date-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}.pc-date-weekday{text-align:center;font-size:11px;color:#8a809c;padding:3px 0 8px}.pc-date-day{border:0;background:transparent;border-radius:11px;height:36px;padding:0;color:#30283e;font-size:13px;transition:background .12s,color .12s}.pc-date-day:hover:not(:disabled){background:#eee8ff;color:#5d32d4}.pc-date-day[data-outside=true]{color:#a89fb7}.pc-date-day[data-today=true]{box-shadow:inset 0 0 0 1px #baa6fc}.pc-date-day[aria-selected=true]{background:#6840e9;color:#fff;box-shadow:0 3px 8px #6840e92b}.pc-date-day:disabled{opacity:.28;cursor:default}
+.pc-date-footer{border-top:1px solid #eee8f6;margin-top:12px;padding-top:11px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:11px;color:#8a809c}.pc-date-footer button{color:#643ee0;border:0;background:transparent;padding:4px}.pc-date-status{flex:1;text-align:right}.pc-date-value-roll{animation:pc-date-value .18s ease-out}@keyframes pc-date-in{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}@keyframes pc-date-value{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.pc-date-pop,.pc-date-value-roll{animation:none}.pc-date-trigger,.pc-date-trigger svg,.pc-date-day{transition:none}}
+
+
+</style>
+<style id="packcheck-mobile-nav">
+.pc-nav-highlight,.pc-mobile-label,#tab-mobile-settings{display:none}
+.pc-settings-overlay{display:none}
+@media(max-width:899px){
+  nav.tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;padding:6px;width:calc(100% - 24px);max-width:520px;bottom:calc(10px + env(safe-area-inset-bottom,0px));border:1px solid #ffffff16;border-radius:25px;background:linear-gradient(145deg,#24212c,#17151d);box-shadow:0 12px 35px #17132340;isolation:isolate;overflow:visible}
+  nav.tabs .pc-nav-extra,nav.tabs .sidebar-brand,nav.tabs .pc-desktop-label{display:none!important}
+  nav.tabs #tab-mobile-settings,nav.tabs .pc-mobile-label{display:flex}
+  nav.tabs button,nav.tabs button.active{position:relative;z-index:1;display:flex;flex:initial;flex-direction:column;justify-content:center;align-items:center;gap:4px;min-height:62px;min-width:0;margin:0;padding:6px 1px;border-radius:19px;background:transparent!important;box-shadow:none!important;transform:none!important;color:#b4afc1;font-size:clamp(9px,2.5vw,11px);font-weight:600;line-height:1.25;-webkit-tap-highlight-color:transparent;transition:color .22s ease;touch-action:manipulation}
+  nav.tabs button .tab-label,nav.tabs button.active .tab-label{color:inherit;margin:0;white-space:nowrap;max-width:none;overflow:visible;font-size:inherit;line-height:1.3;font-weight:inherit}
+  nav.tabs button .tab-ic,nav.tabs button.active .tab-ic{width:25px;height:25px;background:none;border:0;box-shadow:none;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+  nav.tabs button .tab-ic svg,nav.tabs button.active .tab-ic svg{width:22px;height:22px;stroke:currentColor;transform:none;stroke-width:1.8}
+  nav.tabs button[data-mobile-active=true]{color:#fff;font-weight:700}
+  nav.tabs button[data-mobile-active=true] .tab-ic{transform:translateY(-1px) scale(1.08)}
+  nav.tabs button:active .tab-ic{transform:scale(.92)}
+  nav.tabs button:focus-visible{outline:2px solid #ddd4ff;outline-offset:-3px}
+  nav.tabs .pc-nav-highlight{display:block;position:absolute;z-index:0;left:0;top:6px;bottom:6px;width:var(--pc-nav-width,18%);transform:translateX(var(--pc-nav-x,6px));border-radius:19px;background:linear-gradient(145deg,color-mix(in srgb,var(--pc-nav-color,#7148e8),#fff 12%),var(--pc-nav-color,#7148e8));box-shadow:0 4px 15px color-mix(in srgb,var(--pc-nav-color,#7148e8),transparent 65%);pointer-events:none;transition:transform .38s cubic-bezier(.22,.85,.2,1),width .38s cubic-bezier(.22,.85,.2,1),background .25s,box-shadow .25s}
+  nav.tabs.pc-nav-initial .pc-nav-highlight{transition:none}
+  main{padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))}
+  .pc-settings-overlay{position:fixed;inset:0;z-index:11000;display:flex;align-items:flex-end;justify-content:center;background:#100c1a77;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);padding:12px 12px calc(12px + env(safe-area-inset-bottom,0px));box-sizing:border-box;animation:pc-settings-fade .18s ease-out}
+  .pc-settings-sheet{width:100%;max-width:500px;max-height:85dvh;overflow:auto;overscroll-behavior:contain;padding:12px 18px 20px;box-sizing:border-box;border-radius:28px;background:#faf8ff;box-shadow:0 20px 80px #0c081955;animation:pc-settings-rise .3s cubic-bezier(.22,.85,.2,1);color:#241c36}
+  .pc-settings-handle{width:38px;height:4px;border-radius:3px;background:#d9d0e8;margin:0 auto 18px}
+  .pc-settings-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}.pc-settings-heading h2{font-size:20px;margin:0;font-weight:800}.pc-settings-close{border:1px solid #e5ddef;background:#fff;color:#62566e;border-radius:50%;height:36px;width:36px;display:grid;place-items:center;cursor:pointer}
+  .pc-settings-caption{color:#91849d;font-size:12px;margin:0 0 20px}.pc-settings-links{display:grid;gap:9px}
+  .pc-settings-link{display:flex;align-items:center;gap:13px;width:100%;padding:15px 13px;text-align:left;border:1px solid #e9e1f4;border-radius:18px;background:#fff;color:#2b213d;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s,transform .15s,border-color .15s}
+  .pc-settings-link:active{transform:scale(.98);background:#eee8ff}.pc-settings-link:focus-visible,.pc-settings-close:focus-visible{outline:2px solid #784fe7;outline-offset:2px}.pc-settings-link[aria-current=page]{border-color:#b7a0f5;background:#f0eaff}.pc-settings-symbol{display:grid;place-items:center;width:43px;height:43px;flex:0 0 43px;background:#f0eaff;border-radius:13px;color:#7042dd}.pc-settings-symbol svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.pc-settings-copy{flex:1}.pc-settings-copy strong{display:block;font-size:14px}.pc-settings-copy small{display:block;font-size:11.5px;color:#94889e;margin-top:4px}.pc-settings-arrow{color:#ada0ba;font-size:22px}
+  @keyframes pc-settings-fade{from{opacity:0}to{opacity:1}}@keyframes pc-settings-rise{from{opacity:.4;transform:translateY(32px)}to{opacity:1;transform:none}}
+}
+@media(prefers-reduced-motion:reduce){nav.tabs .pc-nav-highlight,nav.tabs button,nav.tabs button .tab-ic,.pc-settings-link{transition:none!important}.pc-settings-overlay,.pc-settings-sheet{animation:none!important}}
+@media print{#tab-mobile-settings,.pc-nav-highlight,.pc-settings-overlay{display:none!important}}
+
+</style>
 </head>
 <body>
 <div id="app">
@@ -7565,5 +7609,222 @@ setInterval(async () => {
 loadAutoBotConfig();
 </script>
 
+<script>
+// Calendar UI wraps the existing controls: their values and change handlers remain authoritative.
+(() => {
+  const selector = '#date-select,#verify-date-select,#upload-date';
+  const widgets = new WeakMap();
+  const monthFormat = new Intl.DateTimeFormat('th-TH-u-ca-gregory',{month:'long',year:'numeric'});
+  const dateFormat = new Intl.DateTimeFormat('th-TH-u-ca-gregory',{day:'numeric',month:'short',year:'numeric'});
+  const icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18"/></svg>';
+  let active = null;
+  function parse(value){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
+    const [y,m,d] = value.split('-').map(Number), date = new Date(y,m-1,d,12);
+    return date.getFullYear()===y && date.getMonth()===m-1 && date.getDate()===d ? date : null;
+  }
+  function iso(date){ return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
+  function allowed(source,value){
+    if(source.disabled || !parse(value)) return false;
+    if(source.tagName==='SELECT') return [...source.options].some(o=>o.value===value && !o.disabled && !o.parentElement.disabled);
+    return (!source.min || value>=source.min) && (!source.max || value<=source.max);
+  }
+  function sync(widget){
+    const {source,trigger} = widget;
+    const value = parse(source.value);
+    const label = source.tagName==='SELECT' ? source.selectedOptions[0]?.textContent : value ? dateFormat.format(value) : '';
+    const text = trigger.querySelector('.pc-date-value');
+    if(text.textContent !== (label || 'เลือกวันที่')){
+      text.textContent = label || 'เลือกวันที่';
+      text.classList.remove('pc-date-value-roll'); void text.offsetWidth; text.classList.add('pc-date-value-roll');
+    }
+    trigger.setAttribute('aria-label',widget.label + ': ' + (label || 'เลือกวันที่'));
+    if(trigger.disabled !== source.disabled) trigger.disabled = source.disabled;
+  }
+  function close(restore=false){
+    if(!active) return;
+    const {widget,popover} = active;
+    active=null; popover.remove(); widget.trigger.setAttribute('aria-expanded','false');
+    if(restore && widget.trigger.isConnected) widget.trigger.focus({preventScroll:true});
+  }
+  function position(){
+    if(!active) return;
+    const {widget,popover}=active, rect=widget.trigger.getBoundingClientRect();
+    const left=Math.max(10,Math.min(rect.left,innerWidth-popover.offsetWidth-10));
+    const top=rect.bottom+7+popover.offsetHeight<=innerHeight-10 ? rect.bottom+7 : Math.max(10,rect.top-popover.offsetHeight-7);
+    popover.style.left=left+'px'; popover.style.top=top+'px';
+  }
+  function pick(value){
+    const widget=active?.widget;
+    if(!widget || (value && !allowed(widget.source,value))) return;
+    const changed=widget.source.value!==value;
+    widget.source.value=value; sync(widget); close(true);
+    if(changed){
+      widget.source.dispatchEvent(new Event('input',{bubbles:true}));
+      widget.source.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+  }
+  function draw(focusDate){
+    const {widget,popover,month}=active, source=widget.source;
+    const today=iso(new Date()), selected=source.value;
+    const start=new Date(month.getFullYear(),month.getMonth(),1,12);
+    start.setDate(1-start.getDay());
+    popover.innerHTML=`<div class="pc-date-head"><button type="button" class="pc-date-nav" data-month="-1" aria-label="เดือนก่อนหน้า">‹</button><span class="pc-date-title" aria-live="polite">${monthFormat.format(month)}</span><button type="button" class="pc-date-nav" data-month="1" aria-label="เดือนถัดไป">›</button><button type="button" class="pc-date-today" data-today ${allowed(source,today)?'':'disabled'}>วันนี้</button></div><div class="pc-date-grid" role="grid" aria-label="เลือกวันที่"><div class="pc-date-weekday" role="columnheader">อา</div><div class="pc-date-weekday" role="columnheader">จ</div><div class="pc-date-weekday" role="columnheader">อ</div><div class="pc-date-weekday" role="columnheader">พ</div><div class="pc-date-weekday" role="columnheader">พฤ</div><div class="pc-date-weekday" role="columnheader">ศ</div><div class="pc-date-weekday" role="columnheader">ส</div></div><div class="pc-date-footer"><span>เลือกได้เฉพาะวันที่มีในรายการ</span><span class="pc-date-status"></span></div>`;
+    if(source.tagName!=='SELECT'){
+      const footer=popover.querySelector('.pc-date-footer'); footer.firstElementChild.textContent='';
+      const clear=document.createElement('button'); clear.type='button';clear.textContent='ล้างวันที่';clear.dataset.clear='';clear.disabled=!source.value;footer.firstElementChild.append(clear);
+    }
+    popover.querySelector('.pc-date-status').textContent=parse(selected)?'เลือก '+dateFormat.format(parse(selected)):'เลือกวันที่';
+    const grid=popover.querySelector('.pc-date-grid');
+    for(let i=0;i<42;i++){
+      const date=new Date(start); date.setDate(start.getDate()+i);
+      const value=iso(date), button=document.createElement('button');
+      button.type='button'; button.className='pc-date-day';button.dataset.date=value;
+      button.dataset.outside=String(date.getMonth()!==month.getMonth());button.dataset.today=String(value===today);
+      button.setAttribute('role','gridcell');button.setAttribute('aria-selected',String(value===selected));button.setAttribute('aria-label',dateFormat.format(date));
+      button.disabled=!allowed(source,value); button.tabIndex=-1;button.textContent=date.getDate();grid.append(button);
+    }
+    const days=[...grid.querySelectorAll('button:not(:disabled)')];
+    const target=days.find(b=>b.dataset.date===focusDate)||days.find(b=>b.dataset.date===selected)||days.find(b=>b.dataset.date===today)||days.find(b=>b.dataset.outside==='false')||days[0];
+    if(target){target.tabIndex=0;if(focusDate)target.focus({preventScroll:true});}
+    position();
+  }
+  function open(widget){
+    close(); if(widget.source.disabled) return;
+    const selected=parse(widget.source.value)||new Date();
+    const popover=document.createElement('div');popover.id=widget.source.id+'-calendar';popover.className='pc-date-pop';popover.setAttribute('role','dialog');popover.setAttribute('aria-label',widget.label);
+    active={widget,popover,month:new Date(selected.getFullYear(),selected.getMonth(),1,12)};
+    document.body.append(popover);widget.trigger.setAttribute('aria-expanded','true');draw();
+    (popover.querySelector('.pc-date-day[tabindex="0"]')||popover.querySelector('button')).focus({preventScroll:true});
+    popover.addEventListener('click',e=>{
+      const button=e.target.closest('button');if(!button || button.disabled || !active)return;
+      if(button.dataset.date) pick(button.dataset.date);
+      else if(button.hasAttribute('data-today'))pick(iso(new Date()));
+      else if(button.hasAttribute('data-clear'))pick('');
+      else if(button.dataset.month){active.month.setMonth(active.month.getMonth()+Number(button.dataset.month));draw();popover.querySelector(`[data-month="${button.dataset.month}"]`).focus();}
+    });
+    popover.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){e.preventDefault();close(true);return;}
+      const current=parse(e.target.dataset.date);if(!current)return;
+      const delta={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7,Home:-current.getDay(),End:6-current.getDay()}[e.key];
+      if(delta!==undefined){e.preventDefault();current.setDate(current.getDate()+delta);}
+      else if(e.key==='PageUp'||e.key==='PageDown'){e.preventDefault();const day=current.getDate();current.setDate(1);current.setMonth(current.getMonth()+(e.key==='PageUp'?-1:1));current.setDate(Math.min(day,new Date(current.getFullYear(),current.getMonth()+1,0).getDate()));}
+      else return;
+      // Skip unavailable days for arrow movement, within the original list's range.
+      if(!allowed(widget.source,iso(current)) && widget.source.tagName==='SELECT'){
+        const values=[...widget.source.options].map(o=>o.value).filter(v=>allowed(widget.source,v)).sort();
+        const backwards=['ArrowLeft','ArrowUp','Home','PageUp'].includes(e.key);
+        const value=backwards?values.reverse().find(v=>v<=iso(current)):values.find(v=>v>=iso(current));
+        if(!value)return;current.setTime(parse(value).getTime());
+      }
+      if(!allowed(widget.source,iso(current)))return;
+      active.month=new Date(current.getFullYear(),current.getMonth(),1,12);draw(iso(current));
+    });
+  }
+  function enhance(){
+    if(active && !active.widget.source.isConnected)close();
+    document.querySelectorAll(selector).forEach(source=>{
+      if(widgets.has(source)){sync(widgets.get(source));return;}
+      const label=source.id==='date-select'?'วันที่รับออเดอร์':source.id==='verify-date-select'?'รอบวันที่แพ็คสินค้า':'วันที่ของรอบแพ็คนี้';
+      const trigger=document.createElement('button');trigger.type='button';trigger.id=source.id+'-trigger';trigger.className='pc-date-trigger';trigger.setAttribute('aria-label',label);trigger.setAttribute('aria-haspopup','dialog');trigger.setAttribute('aria-expanded','false');trigger.setAttribute('aria-controls',source.id+'-calendar');
+      trigger.innerHTML=icon+'<span class="pc-date-value"></span><svg class="pc-date-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+      source.classList.add('pc-date-native');source.tabIndex=-1;source.setAttribute('aria-hidden','true');source.after(trigger);
+      const widget={source,trigger,label};widgets.set(source,widget);sync(widget);
+      trigger.onclick=()=>active?.widget===widget?close(true):open(widget);
+      trigger.onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();open(widget);}if(e.key==='Escape')close(true);};
+      source.addEventListener('change',()=>sync(widget));
+    });
+    if(active && active.widget.source.disabled)close();
+  }
+  const observer=new MutationObserver(enhance);
+  observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','selected','value']});
+  document.addEventListener('pointerdown',e=>{if(active&&!active.popover.contains(e.target)&&!active.widget.trigger.contains(e.target))close();});
+  document.addEventListener('focusin',e=>{if(active&&!active.popover.contains(e.target)&&e.target!==active.widget.trigger)close();});
+  window.addEventListener('resize',position);window.addEventListener('scroll',position,true);
+  enhance();
+})();
+
+</script>
+<script>
+(() => {
+  const nav=document.querySelector('nav.tabs');
+  if(!nav || document.getElementById('tab-mobile-settings'))return;
+  const mobile=matchMedia('(max-width:899px)');
+  const primary=['dash','staff','api-print','verify'];
+  const colors={dash:'#7650cf',staff:'#6744df','api-print':'#376ac9',verify:'#188776',settings:'#a56727'};
+  const extra=[
+    {id:'autobot',title:'บอทปริ้นออโต้',hint:'ตั้งรอบรับออเดอร์และพิมพ์อัตโนมัติ'},
+    {id:'admin',title:'อัปโหลดออเดอร์',hint:'นำเข้าไฟล์รายการออเดอร์'},
+    {id:'print',title:'บาร์โค้ดสินค้า',hint:'จัดการและพิมพ์บาร์โค้ด'},
+    {id:'sets',title:'ตั้งค่าเซท',hint:'จัดการสินค้าในแต่ละเซท'}
+  ];
+  extra.forEach(item=>document.getElementById('tab-'+item.id)?.classList.add('pc-nav-extra'));
+  const printLabel=document.querySelector('#tab-api-print .tab-label');
+  if(printLabel){printLabel.classList.add('pc-desktop-label');const label=document.createElement('span');label.className='tab-label pc-mobile-label';label.textContent='ปริ้น';printLabel.after(label);}
+  const settings=document.createElement('button');settings.type='button';settings.id='tab-mobile-settings';settings.setAttribute('aria-haspopup','dialog');settings.setAttribute('aria-expanded','false');settings.setAttribute('aria-controls','pc-mobile-settings-dialog');
+  settings.innerHTML='<span class="tab-ic"><svg viewBox="0 0 24 24"><path d="m9 3-.6 2.3-2 .9L4.3 5.5l-2 3.4L4 10.5v2.9L2.3 15l2 3.5 2.2-.7 2 .9L9 21h4l.6-2.3 2-.9 2.1.7 2-3.5-1.7-1.6v-2.9l1.7-1.6-2-3.4-2.1.7-2-.9L13 3Z"/><circle cx="11" cy="12" r="3"/></svg></span><span class="tab-label">ตั้งค่า</span>';
+  nav.append(settings);
+  const highlight=document.createElement('span');highlight.className='pc-nav-highlight';highlight.setAttribute('aria-hidden','true');nav.prepend(highlight);nav.classList.add('pc-nav-initial');
+  let overlay=null,previousOverflow='',restoreFocus=null;
+  function update(){
+    const selected=overlay?'settings':primary.includes(State.view)?State.view:'settings';
+    const selectedButton=selected==='settings'?settings:document.getElementById('tab-'+selected);
+    nav.querySelectorAll('button').forEach(button=>{
+      const chosen=mobile.matches?button===selectedButton:button.id==='tab-'+State.view;
+      button.dataset.mobileActive=String(button===selectedButton);
+      if(chosen)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+    });
+    if(!mobile.matches || !selectedButton)return;
+    const bounds=nav.getBoundingClientRect(),rect=selectedButton.getBoundingClientRect();
+    nav.style.setProperty('--pc-nav-x',(rect.left-bounds.left-nav.clientLeft)+'px');
+    nav.style.setProperty('--pc-nav-width',rect.width+'px');
+    nav.style.setProperty('--pc-nav-color',colors[selected]);
+  }
+  function close(restore=true){
+    if(!overlay)return;
+    overlay.remove();overlay=null;document.body.style.overflow=previousOverflow;settings.setAttribute('aria-expanded','false');
+    update();if(restore && restoreFocus?.isConnected)restoreFocus.focus({preventScroll:true});
+  }
+  function show(){
+    if(!mobile.matches)return;
+    if(overlay){close();return;}
+    restoreFocus=document.activeElement;previousOverflow=document.body.style.overflow;
+    overlay=document.createElement('div');overlay.className='pc-settings-overlay';
+    overlay.innerHTML='<section class="pc-settings-sheet" id="pc-mobile-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="pc-settings-title"><div class="pc-settings-handle" aria-hidden="true"></div><div class="pc-settings-heading"><h2 id="pc-settings-title">ตั้งค่าและเมนูเพิ่มเติม</h2><button type="button" class="pc-settings-close" aria-label="ปิดเมนูตั้งค่า">✕</button></div><p class="pc-settings-caption">เครื่องมือจัดการร้าน รวมไว้ในที่เดียว</p><div class="pc-settings-links"></div></section>';
+    const links=overlay.querySelector('.pc-settings-links');
+    extra.forEach(item=>{
+      const original=document.getElementById('tab-'+item.id);if(!original || original.disabled)return;
+      const button=document.createElement('button');button.type='button';button.className='pc-settings-link';button.dataset.menu=item.id;
+      if(State.view===item.id)button.setAttribute('aria-current','page');
+      const symbol=document.createElement('span');symbol.className='pc-settings-symbol';
+      const svg=original.querySelector('svg');if(svg){symbol.append(svg.cloneNode(true));symbol.setAttribute('aria-hidden','true');}
+      const copy=document.createElement('span');copy.className='pc-settings-copy';const title=document.createElement('strong');title.textContent=item.title;const hint=document.createElement('small');hint.textContent=item.hint;copy.append(title,hint);
+      const arrow=document.createElement('span');arrow.className='pc-settings-arrow';arrow.textContent='›';arrow.setAttribute('aria-hidden','true');button.append(symbol,copy,arrow);
+      button.onclick=()=>{close(false);settings.focus({preventScroll:true});original.click();};links.append(button);
+    });
+    document.body.append(overlay);document.body.style.overflow='hidden';settings.setAttribute('aria-expanded','true');update();
+    overlay.querySelector('.pc-settings-close').onclick=()=>close();
+    overlay.addEventListener('pointerdown',e=>{if(e.target===overlay)close();});
+    overlay.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}
+      if(e.key!=='Tab')return;
+      const elements=[...overlay.querySelectorAll('button:not(:disabled)')],first=elements[0],last=elements.at(-1);
+      if(e.shiftKey && document.activeElement===first){e.preventDefault();last.focus();}
+      else if(!e.shiftKey && document.activeElement===last){e.preventDefault();first.focus();}
+    });
+    overlay.querySelector('.pc-settings-close').focus({preventScroll:true});
+  }
+  settings.onclick=show;
+  const previousSetTab=setTab;
+  setTab=function(tab){close(false);const result=previousSetTab(tab);update();return result;};
+  // Preserve the existing desktop sidebar and all original routes and handlers.
+  mobile.addEventListener('change',()=>{if(!mobile.matches)close(false);update();});
+  window.addEventListener('resize',update);
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(update).observe(nav);
+  update();requestAnimationFrame(()=>{update();requestAnimationFrame(()=>nav.classList.remove('pc-nav-initial'));});
+  document.fonts?.ready.then(update);
+})();
+
+</script>
 </body>
 </html>
