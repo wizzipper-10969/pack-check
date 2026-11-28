@@ -1058,7 +1058,13 @@ function sanitizeDocId(key){
 }
 
 /* ============ STORAGE HELPERS (Firestore-backed) ============ */
+const packcheckPointReads=new Map();
 async function rawGet(key){
+  if(packcheckPointReads.has(key))return packcheckPointReads.get(key);
+  const pending=rawGetSingle(key);packcheckPointReads.set(key,pending);
+  try{return await pending;}finally{if(packcheckPointReads.get(key)===pending)packcheckPointReads.delete(key);}
+}
+async function rawGetSingle(key){
   if(!backendReady) return null;
   const doc = await db.collection('packcheck').doc(sanitizeDocId(key)).get();
   return doc.exists ? doc.data().value : null;
@@ -1083,7 +1089,13 @@ function withTimeout(promise, ms, label){
   const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error((label||'การเชื่อมต่อ')+' หมดเวลา (เกิน '+Math.round(ms/1000)+' วินาที) — ตรวจสอบอินเทอร์เน็ตหรือโควต้า Firebase')), ms); });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
+const packcheckRangeReads=new Map();
 async function rawListValues(prefix){
+  if(packcheckRangeReads.has(prefix))return packcheckRangeReads.get(prefix);
+  const pending=rawListValuesSingle(prefix);packcheckRangeReads.set(prefix,pending);
+  try{return await pending;}finally{if(packcheckRangeReads.get(prefix)===pending)packcheckRangeReads.delete(prefix);}
+}
+async function rawListValuesSingle(prefix){
   if(!backendReady) return [];
   const snap = await withTimeout(db.collection('packcheck')
     .orderBy(firebase.firestore.FieldPath.documentId())
@@ -1645,7 +1657,14 @@ const State = {
 };
 
 /* ============ DATA LAYER ============ */
-async function loadDateIndex(){
+let dateIndexReadAt=0,dateIndexRequest=null;
+async function loadDateIndex(force=false){
+  if(!force && dateIndexReadAt && Date.now()-dateIndexReadAt<30000)return State.dates;
+  if(dateIndexRequest)return dateIndexRequest;
+  dateIndexRequest=loadDateIndexFresh().then(result=>{dateIndexReadAt=Date.now();return result;}).finally(()=>{dateIndexRequest=null;});
+  return dateIndexRequest;
+}
+async function loadDateIndexFresh(){
   const raw = await sGet('dateindex', true);
   let arr = [];
   try{ arr = raw ? JSON.parse(raw) : []; }catch(e){ arr=[]; }
@@ -1663,10 +1682,12 @@ async function readDateIndexStrict(){
   return arr;
 }
 async function addDateToIndex(date){
+  dateIndexReadAt=0;
   const arr = await readDateIndexStrict();
   if(!arr.includes(date)){ arr.push(date); await rawSet('dateindex', JSON.stringify(arr)); }
 }
 async function removeDateFromIndex(date){
+  dateIndexReadAt=0;
   let arr = await readDateIndexStrict();
   arr = arr.filter(d => d !== date);
   await rawSet('dateindex', JSON.stringify(arr));
@@ -1726,7 +1747,7 @@ async function mapWithConcurrency(items, limit, fn){
    เดิมทุกครั้งที่เปิดรายการ/กดกลับ/สลับแท็บ/แพ็คเสร็จ 1 ออเดอร์ จะอ่านออเดอร์ "ทั้งวัน" ใหม่
    (N ออเดอร์ = N reads ต่อครั้ง) จนเกินโควต้าฟรี 50K reads/วัน
    ตอนนี้อ่านทั้งวันครั้งเดียวตอนเปิดวันนั้น หลังจากนั้นเสียแค่ doc ที่มีการเปลี่ยนแปลง
-   (ที่เครื่องนี้เขียนเองไม่นับ) และยังเห็นความเคลื่อนไหวจากเครื่องอื่นแบบสดๆ */
+   และยังเห็นความเคลื่อนไหวจากเครื่องอื่นแบบสดๆ */
 const orderLive = { date: null, docs: new Map(), ready: null, unsub: null, failed: false };
 function stopOrderWatch(){
   if(orderLive.unsub){ try{ orderLive.unsub(); }catch(e){} }
@@ -6111,7 +6132,7 @@ async function fetchApiOrdersForPrintView(autoSyncToQueue = false){
     State.apiOrdersAll = json.data?.orders || [];
     try{
       // แสดงสถานะ "พิมพ์แล้ว": ใช้แคชประวัติ (ช่วงเก่าอยู่ในเครื่อง ช่วงล่าสุดอ่านสดไม่เกินทุก 5 นาที)
-      const knownIds = await loadOrderHistoryIds({ maxAgeMs: 5 * 60 * 1000 });
+      const knownIds = await loadPrintViewHistoryIds();
       knownIds.forEach(id => State.apiPrintedIds.add(String(id)));
     }catch(e){}
     applyApiPrintFilters(false);
@@ -7086,9 +7107,66 @@ async function ensureReceiptsLoaded(packageIds){
 
 // Legacy packing rows protect old orders from automatic reprinting. They are not
 // proof of physical printing, but must never become new work after an upgrade.
+// Read efficiency v1
+// Display-only history: never download all historical orders just to open Print.
+// The authoritative pre-print history/receipt checks remain in loadApiPrintHistory.
+let printViewDayCache=null,printViewDayRequest=null;
+const printViewReceiptChecks=new Map();
+async function completePrintViewHistory(ids){
+  const unresolved=(State.apiOrdersAll||[]).filter(o=>!ids.has(String(o.id||o.order_id)));
+  const packages=[...new Set(unresolved.flatMap(labelPackageIds))];
+  const need=packages.filter(id=>!State.apiSubmittedPackages?.has(id) && (!printViewReceiptChecks.has(id)||Date.now()-printViewReceiptChecks.get(id)>=60000));
+  if(need.length){
+    await ensureReceiptsLoaded(need);
+    need.forEach(id=>printViewReceiptChecks.set(id,Date.now()));
+  }
+  for(const order of unresolved){
+    const packages=labelPackageIds(order);
+    if(packages.length&&packages.every(id=>State.apiSubmittedPackages?.get(id)?.status==='submitted'))ids.add(String(order.id||order.order_id));
+  }
+  return ids;
+}
+function rememberOrderIds(rows,ids){
+  for(const row of rows){
+    const order=JSON.parse(row.value);
+    const originals=order.originalOrderIds?.length?order.originalOrderIds:[order.orderId];
+    originals.filter(Boolean).forEach(id=>ids.add(String(id)));
+  }
+}
+async function loadPrintViewHistoryIds(){
+  const ids=new Set(State.apiPrintedIds||[]);
+  if(typeof _orderHistMemo!=='undefined' && _orderHistMemo)_orderHistMemo.ids.forEach(id=>ids.add(String(id)));
+  const cached=await idbGet(ORDER_HIST_KEY);
+  if(Array.isArray(cached?.v?.ids))cached.v.ids.forEach(id=>ids.add(String(id)));
+  const date=todayStr();
+  if(orderLive.date===date && orderLive.ready && !orderLive.failed){
+    await orderLive.ready;
+    if(orderLive.date===date && !orderLive.failed){
+      rememberOrderIds([...orderLive.docs].map(([key,value])=>({key,value})),ids);
+      return completePrintViewHistory(ids);
+    }
+  }
+  // Opening another date must not replace its realtime listener.
+  if(!printViewDayCache || printViewDayCache.date!==date || Date.now()-printViewDayCache.at>=60000){
+    if(!printViewDayRequest || printViewDayRequest.date!==date){
+      const request={date,promise:null};
+      request.promise=sListValues('order:'+date+':',true,true).then(rows=>{
+        printViewDayCache={date,at:Date.now(),rows};return rows;
+      }).finally(()=>{if(printViewDayRequest===request)printViewDayRequest=null;});
+      printViewDayRequest=request;
+    }
+    rememberOrderIds(await printViewDayRequest.promise,ids);
+  }else rememberOrderIds(printViewDayCache.rows,ids);
+  return completePrintViewHistory(ids);
+}
+
 async function loadApiPrintHistory(candidates, opts){
   if(typeof backendReady !== 'undefined' && !backendReady) throw new Error('ฐานข้อมูลยังไม่พร้อม จึงยังไม่รันบอทเพื่อป้องกันพิมพ์ซ้ำ');
   opts = opts || {};
+  if(Array.isArray(candidates) && (candidates.length===0 || (opts.skipKnown && candidates.every(o=>State.apiPrintedIds.has(String(o.id||o.order_id)))))){
+    if(!State.apiSubmittedPackages)State.apiSubmittedPackages=new Map();
+    return {knownOrders:new Set(State.apiPrintedIds),submittedPackages:State.apiSubmittedPackages};
+  }
   // ไม่ได้ระบุออเดอร์ที่จะตรวจ → ใช้วิธีเดิม (อ่านทั้งหมด) เพื่อความปลอดภัย
   if(!Array.isArray(candidates)){
     const [packingRows, receiptRows] = await Promise.all([
