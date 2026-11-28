@@ -802,6 +802,19 @@
 }
 @media(prefers-reduced-motion:reduce){nav.tabs .pc-nav-highlight,nav.tabs button,nav.tabs button .tab-ic,.pc-settings-link{transition:none!important}.pc-settings-overlay,.pc-settings-sheet{animation:none!important}}
 @media print{#tab-mobile-settings,.pc-nav-highlight,.pc-settings-overlay{display:none!important}}
+/* Touch refinement: each of the five slots is a full-size, stable hit target. */
+@media(max-width:899px){
+  nav.tabs{gap:0;padding:5px 4px;width:calc(100% - 16px);min-height:80px;box-sizing:border-box;z-index:80;contain:layout style}
+  nav.tabs button,nav.tabs button.active{width:100%;height:68px;min-height:68px;padding:8px 0;gap:5px;border-radius:18px;user-select:none;-webkit-user-select:none}
+  nav.tabs button > *{pointer-events:none}
+  nav.tabs button .tab-ic,nav.tabs button.active .tab-ic{transition:transform .16s ease-out}
+  nav.tabs button .tab-label{font-size:clamp(10px,2.6vw,12px)}
+  nav.tabs .pc-nav-highlight{left:4px;top:5px;bottom:5px;width:calc((100% - 8px)/5);transform:translate3d(calc(var(--pc-nav-index,1)*100%),0,0);will-change:transform;transition:transform .26s cubic-bezier(.2,.75,.25,1);box-shadow:none;background:var(--pc-nav-color,#6744df)}
+  .pc-settings-overlay{backdrop-filter:none;-webkit-backdrop-filter:none}
+  .pc-settings-close{width:44px;height:44px}
+  .pc-settings-link{min-height:72px;touch-action:manipulation}
+  main{padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))}
+}
 
 </style>
 </head>
@@ -3078,10 +3091,62 @@ function selectProduct(code, name){
   renderEditOrderList();
 }
 
+// Shipment tracking aliases v1
+function apiShipmentRefs(orders){
+  const refs=new Map();
+  for(const order of orders){
+    const orderId=String(order.id||order.order_id||'');
+    const rows=[{tracking_number:order.tracking_number},...(order.packages||[]),...(order.package_list||[]),...(order.line_items||[])];
+    for(const row of rows){
+      const tracking=String(row.tracking_number||'').trim();if(!tracking)continue;
+      const ref={orderId,tracking,packageId:String(row.package_id||((order.packages||[]).includes(row)?row.id:'')||'')};
+      const key=orderId+':'+tracking;
+      if(!refs.has(key)||ref.packageId)refs.set(key,ref);
+    }
+  }
+  return [...refs.values()];
+}
+function shipmentScanMatch(order,code){
+  const values=[order.orderId,order.tracking,...(order.originalOrderIds||[]),...(order.shipmentRefs||[]).flatMap(r=>[r.orderId,r.tracking])].filter(Boolean).map(String);
+  // Exact tokens tolerate scanner wrappers without accepting short substring matches.
+  const tokens=String(code).trim().match(/[A-Za-z0-9]+/g)||[];
+  return values.some(v=>v===String(code).trim() || (!v.includes(' + ')&&tokens.includes(v)));
+}
+async function verifyShipmentLabel(match,code){
+  const key=orderKey(State.date,match.orderId),ref=db.collection('packcheck').doc(sanitizeDocId(key));
+  const result=await db.runTransaction(async transaction=>{
+    const snapshot=await transaction.get(ref);if(!snapshot.exists)throw new Error('ไม่พบข้อมูลกลุ่มออเดอร์ล่าสุด');
+    const order=JSON.parse(snapshot.data().value);
+    if(orderStatus(order)!=='done')throw new Error('กลุ่มออเดอร์นี้ยังแพ็คไม่ครบ');
+    const tracks=[...new Set([order.tracking,...(order.shipmentRefs||[]).map(r=>r.tracking)].filter(Boolean))];
+    if(tracks.length<2)throw new Error('ข้อมูลพัสดุเปลี่ยน กรุณาสแกนใหม่');
+    const tokens=String(code).trim().match(/[A-Za-z0-9]+/g)||[];
+    let track=tracks.find(t=>tokens.includes(t));
+    if(!track){
+      const refs=(order.shipmentRefs||[]).filter(r=>tokens.includes(r.orderId));
+      const candidates=[...new Set(refs.map(r=>r.tracking))];if(candidates.length===1)track=candidates[0];
+    }
+    if(!track)throw new Error('กลุ่มนี้มีหลายพัสดุ กรุณาสแกนเลขพัสดุแต่ละใบ');
+    if(verifyStatusOf(order)==='verified')return {order,done:true,duplicate:true,count:tracks.length,total:tracks.length};
+    const checks={...(order.shipmentChecks||{})};
+    const duplicate=!!checks[track];checks[track]||={at:Date.now(),by:State.staffName||'ไม่ระบุชื่อ'};
+    const count=tracks.filter(t=>checks[t]).length,done=count===tracks.length;
+    if(!duplicate){
+      order.shipmentChecks=checks;order.updatedAt=Date.now();
+      if(done){order.items.forEach(i=>{i.qtyVerified=i.qtyRequired;});order.verifiedAt=Date.now();order.verifiedBy=State.staffName||'ไม่ระบุชื่อ';}
+      transaction.set(ref,{value:JSON.stringify(order),updatedAt:order.updatedAt});
+    }
+    return {order,done,duplicate,count,total:tracks.length};
+  });
+  const index=State.verifyOrders.findIndex(o=>o.orderId===result.order.orderId);if(index>=0)State.verifyOrders[index]=result.order;
+  if(result.done){beep(result.duplicate?'warn':'done');showVerifyPopup(result.order,result.duplicate?'warn':'success');}
+  else {beep(result.duplicate?'warn':'success');showFeedback(result.duplicate?'warn':'success',`${result.duplicate?'ใบนี้ตรวจแล้ว':'รับการตรวจใบนี้แล้ว'} (${result.count}/${result.total} พัสดุ) — สแกนใบที่เหลือให้ครบก่อนยืนยันทั้งกลุ่ม`);}
+}
+
 async function handleOrderLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
-  let match = State.orders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
+  let match = State.orders.find(o => shipmentScanMatch(o,code));
   if(!match){
     // fallback: loose contains-match, in case the scanned QR/barcode has extra characters around the number
     match = State.orders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
@@ -3138,19 +3203,19 @@ async function resetVerificationForDate(date, resetId, staff){
         if(!snapshot.exists) return;
         const order = JSON.parse(snapshot.data().value);
         if(!Array.isArray(order.items)) throw new Error('รายการสินค้าไม่ถูกต้อง จึงยังไม่ล้างผลตรวจ');
-        if(!order.verifiedAt && !order.verifiedBy && !order.items.some(item => Number(item.qtyVerified) > 0)) return;
+        if(!order.verifiedAt && !order.verifiedBy && !Object.keys(order.shipmentChecks||{}).length && !order.items.some(item => Number(item.qtyVerified) > 0)) return;
         // Keep an independent backup of QC counters/identity, without copying
         // customer details. The backup and reset commit together.
         const backup = {
           date, orderId: order.orderId, resetId, resetAt: now, resetBy: staff,
-          verifiedAt: order.verifiedAt || null, verifiedBy: order.verifiedBy || null,
+          verifiedAt: order.verifiedAt || null, verifiedBy: order.verifiedBy || null, shipmentChecks: order.shipmentChecks || {},
           items: order.items.map(item => ({ code: item.code, qtyRequired: item.qtyRequired, qtyVerified: item.qtyVerified || 0 }))
         };
         const backupKey = 'verify-reset-backup:' + date + ':' + resetId + ':' + order.orderId;
         transaction.set(db.collection('packcheck').doc(sanitizeDocId(backupKey)), { value: JSON.stringify(backup), updatedAt: now });
         const next = {
           ...order, items: order.items.map(item => ({ ...item, qtyVerified: 0 })),
-          verifiedAt: null, verifiedBy: null, updatedAt: now,
+          verifiedAt: null, verifiedBy: null, shipmentChecks: {}, updatedAt: now,
           verificationReset: { id: resetId, at: now, by: staff }
         };
         transaction.set(refs[index], { value: JSON.stringify(next), updatedAt: now });
@@ -3268,7 +3333,7 @@ function renderVerifyList(){
       <div class="stat"><div class="num" style="color:var(--danger)">${pendingCount}</div><div class="lbl">รอตรวจสอบ</div></div>
     </div>
     <div class="toolbar-panel" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <button type="button" class="btn secondary" id="verify-reset-all-btn" style="color:var(--danger);border-color:var(--danger);flex:0 0 auto" ${State.verifyResetRunning || !State.verifyOrders.some(o => o.verifiedAt || o.verifiedBy || o.items?.some(i => Number(i.qtyVerified)>0)) ? 'disabled' : ''}>${State.verifyResetRunning ? 'กำลังล้างผลตรวจ...' : '↻ ตรวจสอบใหม่ทั้งหมด'}</button>
+      <button type="button" class="btn secondary" id="verify-reset-all-btn" style="color:var(--danger);border-color:var(--danger);flex:0 0 auto" ${State.verifyResetRunning || !State.verifyOrders.some(o => o.verifiedAt || o.verifiedBy || Object.keys(o.shipmentChecks||{}).length || o.items?.some(i => Number(i.qtyVerified)>0)) ? 'disabled' : ''}>${State.verifyResetRunning ? 'กำลังล้างผลตรวจ...' : '↻ ตรวจสอบใหม่ทั้งหมด'}</button>
       <span class="muted" style="font-size:12px">ล้างเฉพาะผลตรวจก่อนส่งทั้งหมดของวันที่เลือก แล้วสแกนตรวจใหม่ทีละออเดอร์</span>
     </div>
     <input type="text" id="search-box" placeholder="ค้นหา Order ID หรือชื่อลูกค้า..." value="${esc(State.search)}">
@@ -3394,7 +3459,7 @@ async function handleVerifyLookupScan(raw){
   const code = raw.trim();
   if(!code) return;
   lastVerifyScanAt = Date.now();
-  let match = State.verifyOrders.find(o => o.orderId === code || (o.tracking && o.tracking === code) || (Array.isArray(o.originalOrderIds) && o.originalOrderIds.includes(code)));
+  let match = State.verifyOrders.find(o => shipmentScanMatch(o,code));
   if(!match){
     match = State.verifyOrders.find(o => (o.tracking && (code.includes(o.tracking) || o.tracking.includes(code))) || code.includes(o.orderId));
   }
@@ -3412,6 +3477,11 @@ async function handleVerifyLookupScan(raw){
 
   // one scan of the shipping label = the whole order is confirmed ready to ship — no
   // need to re-scan every item individually again
+  if(new Set([match.tracking,...(match.shipmentRefs||[]).map(r=>r.tracking)].filter(Boolean)).size>1){
+    try{ await verifyShipmentLabel(match,code); }
+    catch(error){beep('error');showFeedback('danger',error.message);}
+    return;
+  }
   const raw2 = await fetchOrderRaw(State.date, match.orderId);
   const order = raw2 ? JSON.parse(raw2) : match;
 
@@ -3619,6 +3689,7 @@ async function undoLastVerifyScan(){
   if(!it || it.code !== ls.code){ State.lastVerifyScan = null; render(); return; }
   if(!it.qtyVerified || it.qtyVerified <= 0){ State.lastVerifyScan = null; render(); return; }
   it.qtyVerified--;
+  o.shipmentChecks = {};
   o.verifiedAt = null;
   o.verifiedBy = null;
   await saveOrder(State.date, o);
@@ -5620,7 +5691,7 @@ async function syncOrdersFromTikTokApi(){
     await refreshStaffList();
     render();
   }catch(err){
-    toast('❌ เชื่อมต่อ Worker ไม่สำเร็จ: ' + err.message);
+    toast('❌ ซิงค์ออเดอร์ไม่สำเร็จ: ' + err.message);
   }
 }
 
@@ -6380,26 +6451,37 @@ function getApiOrderAddressKey(ao){
   return `${name}|${phone}|${postal}|${fullAddr}`;
 }
 
+// Parcel grouping policy v2
+// Names and addresses never establish that two orders share a parcel.
 function buildSameAddressGroups(ordersList){
-  const byKey = {};
-  (ordersList || []).forEach(ao => {
-    const trk = String(ao.tracking_number || ao.packages?.[0]?.tracking_number || '').trim();
-    const addrKey = getApiOrderAddressKey(ao);
-    const groupKey = trk ? ('TRK:' + trk) : (addrKey ? ('ADDR:' + addrKey) : ('OID:' + String(ao.id || ao.order_id)));
-    if(!byKey[groupKey]) byKey[groupKey] = [];
-    byKey[groupKey].push(ao);
-  });
-  const oidToGroup = {};
-  Object.values(byKey).forEach(grp => {
-    if(grp.length >= 2){
-      const ids = grp.map(x => String(x.id || x.order_id)).sort();
-      grp.forEach(x => { oidToGroup[String(x.id || x.order_id)] = ids; });
+  const byKey={},seen=new Set();
+  for(const order of ordersList||[]){
+    const id=String(order.id||order.order_id||'');if(!id||seen.has(id))continue;seen.add(id);
+    const packages=new Set([
+      ...(order.packages||[]).map(p=>p.id||p.package_id),
+      ...(order.package_list||[]).map(p=>p.package_id||p.id),
+      ...(order.line_items||[]).map(i=>i.package_id)
+    ].filter(Boolean).map(String));
+    const tracks=new Set(apiShipmentRefs([order]).map(r=>r.tracking));
+    const key=packages.size===1&&tracks.size<=1 ? 'PKG:'+ [...packages][0]
+      : packages.size===0&&tracks.size===1 ? 'TRK:'+ [...tracks][0] : 'OID:'+id;
+    (byKey[key]||=[]).push(order);
+  }
+  // Conflicting shipping labels are not treated as a confirmed combined parcel.
+  for(const [key,group] of Object.entries(byKey)){
+    if(group.length>1 && new Set(apiShipmentRefs(group).map(r=>r.tracking)).size>1){
+      delete byKey[key];for(const order of group)byKey['OID:'+String(order.id||order.order_id)]=[order];
     }
-  });
-  return { byKey, oidToGroup };
+  }
+  const oidToGroup={};
+  for(const group of Object.values(byKey))if(group.length>1){
+    const ids=group.map(o=>String(o.id||o.order_id)).sort();
+    ids.forEach(id=>{oidToGroup[id]=ids;});
+  }
+  return {byKey,oidToGroup};
 }
 
-// ฟังก์ชันซิงค์และอัปเดตเลขพัสดุเข้าคิวแพ็คของ PackCheck อัตโนมัติ (รองรับรวมพัสดุที่อยู่เดียวกัน/เลขพัสดุเดียวกัน)
+// ฟังก์ชันซิงค์และอัปเดตเลขพัสดุเข้าคิวแพ็คของ PackCheck อัตโนมัติ (รองรับจัดกลุ่มตามพัสดุจริงของ TikTok/เลขพัสดุเดียวกัน)
 async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDone = false, targetDate = null, respectForceGroupKey = false){
   if(!apiOrdersList || !apiOrdersList.length) return;
   const setDefs = await loadAllSetDefs();
@@ -6419,16 +6501,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
   });
 
   // จัดกลุ่มออเดอร์ตามการยืนยันรวมพัสดุ (หรือตามเลขพัสดุ/ที่อยู่เดียวกัน)
-  let byKey = {};
-  if(respectForceGroupKey){
-    apiOrdersList.forEach(ao => {
-      const k = ao._forceGroupKey || ('SINGLE:' + String(ao.id || ao.order_id));
-      if(!byKey[k]) byKey[k] = [];
-      byKey[k].push(ao);
-    });
-  } else {
-    byKey = buildSameAddressGroups(apiOrdersList).byKey;
-  }
+  const byKey = buildSameAddressGroups(apiOrdersList).byKey;
   const writeEntries = [];
   const keysToDelete = new Set();
   let newCount = 0;
@@ -6517,6 +6590,8 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
     if(prevDoc){
       // คืนสถานะการสแกนเดิม + อัปเดต Tracking Number ใหม่
       let changed = submitted;
+      const shipmentRefs=apiShipmentRefs(validGroup);
+      if(shipmentRefs.length && JSON.stringify(prevDoc.shipmentRefs)!==JSON.stringify(shipmentRefs))changed=true;
       if(bestTracking && prevDoc.tracking !== bestTracking){ updatedTrkCount++; changed = true; }
       if(isMerged && !Array.isArray(prevDoc.originalOrderIds)) changed = true;
 
@@ -6534,6 +6609,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
 
       const updatedObj = {
         ...prevDoc,
+        shipmentRefs: apiShipmentRefs(validGroup),
         orderId: finalOrderId,
         packageId: bestPkgId || prevDoc.packageId || '',
         customer: bestCustomer || prevDoc.customer || 'ลูกค้า TikTok',
@@ -6553,6 +6629,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
         mergedItems.forEach(it => { it.qtyScanned = it.qtyRequired; });
       }
       const orderObj = {
+        shipmentRefs: apiShipmentRefs(validGroup),
         orderId: finalOrderId,
         packageId: bestPkgId,
         customer: bestCustomer || 'ลูกค้า TikTok',
@@ -6579,7 +6656,7 @@ async function upsertApiOrdersToPackCheck(apiOrdersList, silent = false, autoDon
     if(!silent){
       const parts = [];
       if(newCount) parts.push(`ซิงค์ออเดอร์ใหม่ ${newCount} ใบ`);
-      if(mergedGroupCount) parts.push(`รวมที่อยู่เดียวกัน ${mergedGroupCount} กลุ่ม`);
+      if(mergedGroupCount) parts.push(`พัสดุที่ TikTok รวมไว้ ${mergedGroupCount} กลุ่ม`);
       if(updatedTrkCount) parts.push(`อัปเดตเลขพัสดุ ${updatedTrkCount} ใบ`);
       if(parts.length) toast('✅ ' + parts.join(' · '));
     }
@@ -6679,7 +6756,7 @@ function renderCombineGroupsDOM(){
             <div style="font-weight:800;font-size:14.5px;color:var(--accent)">พัสดุที่ ${gIdx + 1} · คุณ ${esc(grp.customer)} <span style="font-size:12px;font-weight:600;color:var(--muted)">(${grp.orders.length} ออเดอร์)</span></div>
             ${grp.address ? `<div class="muted" style="font-size:12px;margin-top:2px">📍 ${esc(grp.address)}</div>` : ''}
           </div>
-          <span class="pill done">พร้อมรวมกล่องเดียว</span>
+          <span class="pill done">TikTok กำหนดเป็นพัสดุเดียวกัน</span>
         </div>
         ${orderRows}
       </div>
@@ -6766,7 +6843,7 @@ function combineApiPreviousDocuments(documents, nextIds){
 
 function preserveApiScanProgress(incoming, previous, autoDone = false){
   if(!previous) return incoming;
-  const next = { ...previous, ...incoming };
+  const next = { ...previous, ...incoming, shipmentChecks: previous.shipmentChecks || {} };
   const sameIds = JSON.stringify(apiOrderOriginalIds(previous)) === JSON.stringify(apiOrderOriginalIds(incoming));
   if(previous.itemsManuallyEdited && !sameIds){
     throw new Error('ออเดอร์ที่แก้สินค้าเองกำลังเปลี่ยนกลุ่ม จึงหยุดเพื่อรักษารายการสินค้าและผลสแกนเดิม');
@@ -7371,7 +7448,7 @@ function renderAutoBotDOM(){
   main.innerHTML = `
     <div class="hero-banner" style="background:${cfg.enabled ? 'linear-gradient(135deg, #5636d3 0%, #3a1fa8 100%)' : 'linear-gradient(135deg, #4b5563 0%, #374151 100%)'}">
       <div class="hero-title">🤖 บอทรับออเดอร์ &amp; ปริ้นอัตโนมัติ</div>
-      <div class="hero-sub">เปิดหน้าเว็บนี้ทิ้งไว้ที่เครื่องคอมพิวเตอร์ร้าน ระบบจะดึงออเดอร์ใหม่ รวมพัสดุที่อยู่เดียวกัน และสั่งปริ้นใบปะหน้าตามเวลาที่ตั้งไว้เอง</div>
+      <div class="hero-sub">เปิดหน้าเว็บนี้ทิ้งไว้ที่เครื่องคอมพิวเตอร์ร้าน ระบบจะดึงออเดอร์ใหม่ จัดกลุ่มตามพัสดุจริงของ TikTok และสั่งปริ้นใบปะหน้าตามเวลาที่ตั้งไว้เอง</div>
       <div class="hero-cta-row">
         <button class="hero-cta-btn" id="bot-toggle-main" style="background:${cfg.enabled ? '#10b981' : '#ff6b00'}">
           ${cfg.enabled ? '🟢 สถานะ: เปิดใช้งานบอทอยู่ (กดเพื่อปิด)' : '⚪ สถานะ: ปิดอยู่ (กดเพื่อเปิดใช้งาน)'}
@@ -7396,7 +7473,7 @@ function renderAutoBotDOM(){
       <div style="font-weight:800;font-size:15px;margin-bottom:10px;color:var(--text)">⚙️ เงื่อนไขการทำงานของบอท</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;color:var(--text);margin-bottom:10px">
         <input type="checkbox" id="bot-opt-merge" ${cfg.autoMergeSameAddr ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)">
-        รวมออเดอร์ที่อยู่เดียวกันเป็นกล่องเดียวให้อัตโนมัติก่อนปริ้น
+        จัดกลุ่มเฉพาะออเดอร์ที่ TikTok ยืนยันเป็นพัสดุเดียวกัน
       </label>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px;color:var(--text);margin-bottom:10px">
         <input type="checkbox" id="bot-opt-popup" ${cfg.autoPrintPopup ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)">
@@ -7766,8 +7843,13 @@ loadAutoBotConfig();
   nav.append(settings);
   const highlight=document.createElement('span');highlight.className='pc-nav-highlight';highlight.setAttribute('aria-hidden','true');nav.prepend(highlight);nav.classList.add('pc-nav-initial');
   let overlay=null,previousOverflow='',restoreFocus=null;
+  let pendingTab=null,pressTab=null,navigationFrame=0,navigationTimer=0,tap=null,suppressClickUntil=0;
+  function cancelNavigation(){
+    cancelAnimationFrame(navigationFrame);clearTimeout(navigationTimer);pendingTab=null;
+  }
   function update(){
-    const selected=overlay?'settings':primary.includes(State.view)?State.view:'settings';
+    const view=pressTab||pendingTab||State.view;
+    const selected=overlay?'settings':primary.includes(view)?view:'settings';
     const selectedButton=selected==='settings'?settings:document.getElementById('tab-'+selected);
     nav.querySelectorAll('button').forEach(button=>{
       const chosen=mobile.matches?button===selectedButton:button.id==='tab-'+State.view;
@@ -7775,9 +7857,8 @@ loadAutoBotConfig();
       if(chosen)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
     });
     if(!mobile.matches || !selectedButton)return;
-    const bounds=nav.getBoundingClientRect(),rect=selectedButton.getBoundingClientRect();
-    nav.style.setProperty('--pc-nav-x',(rect.left-bounds.left-nav.clientLeft)+'px');
-    nav.style.setProperty('--pc-nav-width',rect.width+'px');
+    // Equal-size slots let the compositor move the pill without measuring layout.
+    nav.style.setProperty('--pc-nav-index',String(selected==='settings'?4:primary.indexOf(selected)));
     nav.style.setProperty('--pc-nav-color',colors[selected]);
   }
   function close(restore=true){
@@ -7787,6 +7868,7 @@ loadAutoBotConfig();
   }
   function show(){
     if(!mobile.matches)return;
+    cancelNavigation();pressTab=null;
     if(overlay){close();return;}
     restoreFocus=document.activeElement;previousOverflow=document.body.style.overflow;
     overlay=document.createElement('div');overlay.className='pc-settings-overlay';
@@ -7816,9 +7898,42 @@ loadAutoBotConfig();
   }
   settings.onclick=show;
   const previousSetTab=setTab;
-  setTab=function(tab){close(false);const result=previousSetTab(tab);update();return result;};
+  setTab=function(tab){cancelNavigation();pressTab=null;close(false);const result=previousSetTab(tab);update();return result;};
+  function navigate(tab){
+    if(!mobile.matches){setTab(tab);return;}
+    if(pendingTab===tab || (!pendingTab && State.view===tab)){pressTab=null;update();return;}
+    cancelNavigation();pendingTab=tab;pressTab=null;update();
+    // Paint touch feedback before starting the existing view/data work.
+    navigationFrame=requestAnimationFrame(()=>{
+      navigationTimer=setTimeout(()=>setTab(tab),0);
+    });
+  }
+  primary.forEach(tab=>{const button=document.getElementById('tab-'+tab);if(button)button.onclick=()=>navigate(tab);});
+  function buttonAt(target){return target instanceof Element?target.closest('nav.tabs > button:not(.pc-nav-extra)'):null;}
+  nav.addEventListener('pointerdown',event=>{
+    if(!mobile.matches || !['touch','pen'].includes(event.pointerType) || !event.isPrimary)return;
+    const button=buttonAt(event.target);if(!button || button.disabled)return;
+    tap={button,id:event.pointerId,x:event.clientX,y:event.clientY};
+    pressTab=button===settings?'settings':button.id.slice(4);update();
+  },{passive:true});
+  nav.addEventListener('pointermove',event=>{
+    if(tap && event.pointerId===tap.id && Math.hypot(event.clientX-tap.x,event.clientY-tap.y)>12){tap=null;pressTab=null;update();}
+  },{passive:true});
+  nav.addEventListener('pointerup',event=>{
+    if(!tap || event.pointerId!==tap.id)return;
+    const pressed=tap;tap=null;pressTab=null;
+    if(buttonAt(event.target)!==pressed.button || Math.hypot(event.clientX-pressed.x,event.clientY-pressed.y)>12){update();return;}
+    event.preventDefault();suppressClickUntil=performance.now()+700;
+    pressed.button.click();
+  });
+  nav.addEventListener('pointercancel',()=>{tap=null;pressTab=null;update();});
+  nav.addEventListener('pointerleave',()=>{if(tap){tap=null;pressTab=null;update();}});
+  // Ignore only the browser's follow-up click; keyboard and accessibility clicks work normally.
+  nav.addEventListener('click',event=>{
+    if(event.isTrusted && event.detail>0 && performance.now()<suppressClickUntil){event.preventDefault();event.stopImmediatePropagation();}
+  },true);
   // Preserve the existing desktop sidebar and all original routes and handlers.
-  mobile.addEventListener('change',()=>{if(!mobile.matches)close(false);update();});
+  mobile.addEventListener('change',()=>{cancelNavigation();tap=null;pressTab=null;if(!mobile.matches)close(false);update();});
   window.addEventListener('resize',update);
   if(typeof ResizeObserver!=='undefined')new ResizeObserver(update).observe(nav);
   update();requestAnimationFrame(()=>{update();requestAnimationFrame(()=>nav.classList.remove('pc-nav-initial'));});
